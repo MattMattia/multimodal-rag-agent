@@ -1,0 +1,2 @@
+"""Módulo API de FastAPI."""
+

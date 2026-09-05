@@ -1,0 +1,68 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: rag_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-rag_multimodal}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-rag_multimodal}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Servicio para levantar la API en contenedor Docker
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_api
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-rag_multimodal}
+      PROJECT_NAME: ${PROJECT_NAME:-Sistema RAG Multimodal & Agente IA Autónomo}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GEMINI_AGENT_MODEL: ${GEMINI_AGENT_MODEL:-gemini-1.5-pro}
+      GEMINI_VISION_MODEL: ${GEMINI_VISION_MODEL:-gemini-1.5-flash}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./uploads:/app/uploads
+      - ./tests:/app/tests
+      - ./pytest.ini:/app/pytest.ini
+      - ./.env:/app/.env:ro
+
+  # Servicio Frontend interactivo con Streamlit
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rag_frontend
+    restart: always
+    depends_on:
+      - api
+    environment:
+      API_URL: http://api:8000
+      PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./frontend:/app
+
+volumes:
+  postgres_data:
+    driver: local
