@@ -119,6 +119,40 @@ def send_chat_message(message: str, session_id: str) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+def stream_chat_response(message: str, session_id: str, metadata_container: Dict[str, Any]):
+    """Generador que consume el endpoint SSE /api/v1/agent/chat/stream emitiendo tokens en tiempo real."""
+    payload = {"message": message, "session_id": session_id}
+    try:
+        with httpx.stream(
+            "POST",
+            f"{API_URL}/api/v1/agent/chat/stream",
+            json=payload,
+            timeout=120.0,
+        ) as response:
+            if response.status_code != 200:
+                err_text = response.read().decode("utf-8", errors="ignore")
+                yield f"⚠️ Error del servidor ({response.status_code}): {err_text}"
+                return
+
+            for line in response.iter_lines():
+                line = line.strip()
+                if line.startswith("data: "):
+                    data_str = line[6:].strip()
+                    if not data_str:
+                        continue
+                    try:
+                        event = json.loads(data_str)
+                        ev_type = event.get("type")
+                        if ev_type == "token":
+                            yield event.get("content", "")
+                        elif ev_type == "metadata":
+                            metadata_container.update(event)
+                    except Exception:
+                        pass
+    except Exception as e:
+        yield f"\n\n⚠️ Error de conexión durante la transmisión en streaming: {str(e)}"
+
+
 def fetch_file_bytes(relative_url: str) -> Optional[bytes]:
     """Descarga los bytes de un archivo estático servido por la API."""
     try:
@@ -330,14 +364,35 @@ if user_input:
         st.markdown(user_input)
 
     # 2. Ejecutar agente con spinner animado
+    # 2. Ejecutar agente con streaming de respuestas en tiempo real (SSE)
     with st.chat_message("assistant", avatar="🤖"):
         with st.spinner("El Agente IA está razonando y ejecutando herramientas autónomas..."):
             response_data = send_chat_message(user_input, st.session_state.session_id)
+        stream_metadata: Dict[str, Any] = {}
+        stream_gen = stream_chat_response(
+            message=user_input,
+            session_id=st.session_state.session_id,
+            metadata_container=stream_metadata,
+        )
+        full_reply = st.write_stream(stream_gen)
 
         if response_data.get("success"):
             data = response_data.get("data", {})
             reply = data.get("response", "Sin respuesta.")
             st.markdown(reply)
+        # Mostrar citas bibliográficas si vinieron en la metadata del stream
+        new_citations = stream_metadata.get("citations", [])
+        if new_citations:
+            with st.expander(f"📚 Fuentes y Citas ({len(new_citations)})", expanded=False):
+                for c in new_citations:
+                    doc_name = c.get("document_name", "Documento")
+                    page_num = c.get("page_number")
+                    page_str = f"Pág. {page_num}" if page_num else "Pág. N/D"
+                    chunk_type = c.get("chunk_type", "text")
+                    st.markdown(
+                        f"<div class='citation-box'>📄 <b>{doc_name}</b> ({page_str}) — Tipo: <code>{chunk_type}</code></div>",
+                        unsafe_allow_html=True,
+                    )
 
             # Mostrar citas
             new_citations = data.get("citations", [])
@@ -352,6 +407,14 @@ if user_input:
                             f"<div class='citation-box'>📄 <b>{doc_name}</b> ({page_str}) — Tipo: <code>{chunk_type}</code></div>",
                             unsafe_allow_html=True,
                         )
+        # Mostrar herramientas ejecutadas
+        new_tools = stream_metadata.get("executed_tools", [])
+        if new_tools:
+            with st.expander(f"🛠️ Herramientas Ejecutadas ({len(new_tools)})", expanded=False):
+                for t in new_tools:
+                    tool_name = t.get("tool_name", "tool")
+                    st.markdown(f"<span class='tool-badge'>⚡ {tool_name}</span>", unsafe_allow_html=True)
+                    st.json({"Entrada": t.get("tool_input"), "Salida": t.get("tool_output")})
 
             # Mostrar herramientas ejecutadas
             new_tools = data.get("executed_tools", [])
@@ -361,6 +424,28 @@ if user_input:
                         tool_name = t.get("tool_name", "tool")
                         st.markdown(f"<span class='tool-badge'>⚡ {tool_name}</span>", unsafe_allow_html=True)
                         st.json({"Entrada": t.get("tool_input"), "Salida": t.get("tool_output")})
+        # Botón de descarga si generó PDF
+        for t in new_tools:
+            if t.get("tool_name") == "generate_report_pdf":
+                output = t.get("tool_output", {})
+                if isinstance(output, dict) and output.get("status") == "success":
+                    dl_url = output.get("download_url")
+                    fn = output.get("filename", "reporte.pdf")
+                    if dl_url:
+                        pdf_data = fetch_file_bytes(dl_url)
+                        col_b1, col_b2 = st.columns([1, 2])
+                        with col_b1:
+                            if pdf_data:
+                                st.download_button(
+                                    label=f"📥 Descargar {fn}",
+                                    data=pdf_data,
+                                    file_name=fn,
+                                    mime="application/pdf",
+                                    key=f"dl_new_{uuid.uuid4()}",
+                                )
+                        with col_b2:
+                            public_link = f"{PUBLIC_API_URL}{dl_url}"
+                            st.markdown(f"[🔗 Abrir PDF directamente en el navegador]({public_link})")
 
             # Botón de descarga si generó PDF
             for t in new_tools:
@@ -384,6 +469,8 @@ if user_input:
                             with col_b2:
                                 public_link = f"{PUBLIC_API_URL}{dl_url}"
                                 st.markdown(f"[🔗 Abrir PDF directamente en el navegador]({public_link})")
+    # Recargar para refrescar y sincronizar el estado completo desde PostgreSQL
+    st.rerun()
 
             # Recargar para sincronizar estado completo con PostgreSQL
             st.rerun()

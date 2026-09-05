@@ -159,6 +159,7 @@ Una vez levantado:
 | `GET` | `/api/v1/documents/{id}` | Detalle de un documento y fragmentos generados |
 | `POST` | `/api/v1/search` | Búsqueda Híbrida (`query`, `limit`, filtros de metadata) |
 | `POST` | `/api/v1/agent/chat` | Interacción multi-turno con el Agente Autónomo ReAct |
+| `POST` | `/api/v1/agent/chat/stream` | Respuestas en Streaming en tiempo real (Server-Sent Events) |
 | `GET` | `/api/v1/agent/sessions/{session_id}/history` | Historial persistido de una conversación |
 | `GET` | `/uploads/reports/{filename}` | Descarga de reportes PDF generados por el agente |
 
@@ -166,7 +167,7 @@ Una vez levantado:
 
 ## 🧪 6. Ejecución de la Suite de Pruebas
 
-El sistema incluye una batería exhaustiva de **18 pruebas automatizadas** que validan la ingesta multimodal, el chunking jerárquico, la búsqueda híbrida con RRF, la persistencia en base de datos y el bucle ReAct del agente:
+El sistema incluye una batería exhaustiva de **19 pruebas automatizadas** que validan la ingesta multimodal, el chunking jerárquico, la búsqueda híbrida con RRF, el streaming SSE, la persistencia en base de datos y el bucle ReAct del agente:
 
 ```bash
 docker compose exec api pytest -v
@@ -175,25 +176,26 @@ docker compose exec api pytest -v
 **Resultado de Ejecución:**
 ```
 tests/test_agent.py::test_generate_report_pdf PASSED                     [  5%]
-tests/test_agent.py::test_dispatch_webhook PASSED                        [ 11%]
-tests/test_agent.py::test_agent_execution_turn PASSED                    [ 16%]
-tests/test_agent.py::test_agent_chat_endpoint PASSED                     [ 22%]
-tests/test_agent.py::test_gemini_model_configuration PASSED              [ 27%]
-tests/test_agent.py::test_chat_session_memory_persistence PASSED         [ 33%]
-tests/test_documents.py::test_table_to_markdown PASSED                   [ 38%]
-tests/test_documents.py::test_table_to_markdown_empty PASSED             [ 44%]
-tests/test_documents.py::test_hierarchical_chunker PASSED                [ 50%]
-tests/test_documents.py::test_upload_unsupported_format PASSED           [ 55%]
-tests/test_documents.py::test_vision_placeholder_without_key PASSED      [ 61%]
-tests/test_health.py::test_root_endpoint PASSED                          [ 66%]
-tests/test_health.py::test_root_health_endpoint PASSED                   [ 72%]
-tests/test_search.py::test_embedding_dimensions PASSED                   [ 77%]
-tests/test_search.py::test_embedding_batch_generation PASSED             [ 83%]
-tests/test_search.py::test_reciprocal_rank_fusion_logic PASSED           [ 88%]
+tests/test_agent.py::test_dispatch_webhook PASSED                        [ 10%]
+tests/test_agent.py::test_agent_execution_turn PASSED                    [ 15%]
+tests/test_agent.py::test_agent_chat_endpoint PASSED                     [ 21%]
+tests/test_agent.py::test_agent_chat_stream_endpoint PASSED              [ 26%]
+tests/test_agent.py::test_gemini_model_configuration PASSED              [ 31%]
+tests/test_agent.py::test_chat_session_memory_persistence PASSED         [ 36%]
+tests/test_documents.py::test_table_to_markdown PASSED                   [ 42%]
+tests/test_documents.py::test_table_to_markdown_empty PASSED             [ 47%]
+tests/test_documents.py::test_hierarchical_chunker PASSED                [ 52%]
+tests/test_documents.py::test_upload_unsupported_format PASSED           [ 57%]
+tests/test_documents.py::test_vision_placeholder_without_key PASSED      [ 63%]
+tests/test_health.py::test_root_endpoint PASSED                          [ 68%]
+tests/test_health.py::test_root_health_endpoint PASSED                   [ 73%]
+tests/test_search.py::test_embedding_dimensions PASSED                   [ 78%]
+tests/test_search.py::test_embedding_batch_generation PASSED             [ 84%]
+tests/test_search.py::test_reciprocal_rank_fusion_logic PASSED           [ 89%]
 tests/test_search.py::test_search_endpoint_validation PASSED             [ 94%]
 tests/test_search.py::test_search_endpoint_hybrid PASSED                 [100%]
 
-============================= 18 passed in 57.10s ==============================
+============================= 19 passed in 57.59s ==============================
 ```
 
 ---

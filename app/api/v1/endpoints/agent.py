@@ -1,6 +1,7 @@
 import logging
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,35 @@ from app.services.agent import autonomous_agent_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.post(
+    "/chat/stream",
+    summary="Interacción conversacional con streaming en tiempo real (SSE) del Agente IA",
+)
+async def chat_with_agent_stream(
+    request: AgentChatRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna una respuesta de streaming en tiempo real (Server-Sent Events) del Agente IA.
+
+    Emite eventos estructurados:
+    - `data: {"type": "token", "content": "..."}\\n\\n` para cada fragmento de texto sintetizado.
+    - `data: {"type": "metadata", "citations": [...], "executed_tools": [...], "session_id": "..."}\\n\\n` al concluir la respuesta.
+    """
+    return StreamingResponse(
+        autonomous_agent_service.execute_turn_stream(
+            db=db,
+            user_message=request.message,
+            session_id=request.session_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post(

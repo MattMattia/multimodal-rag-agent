@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 import uuid
 
 from sqlalchemy import select
@@ -284,6 +285,252 @@ class AutonomousAgentService:
 
         logger.error("Todos los modelos candidatos de Gemini fallaron. Último error: %s", last_exc, exc_info=True)
         raise last_exc
+
+    async def _call_gemini_stream_with_fallback(
+        self,
+        contents: List[Any],
+        config: Any,
+        preferred_model: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Ejecuta generate_content_stream probando la cascada de modelos compatibles y produciendo tokens en vivo."""
+        candidate_models = [
+            getattr(self, "_working_model", None) or preferred_model or self.model_name,
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-flash-latest",
+        ]
+        seen = set()
+        unique_models = []
+        for m in candidate_models:
+            if m and m not in seen:
+                seen.add(m)
+                unique_models.append(m)
+
+        last_exc = None
+        for m in unique_models:
+            try:
+                logger.info("Invocando streaming con modelo Gemini: %s", m)
+                stream = await self._client.aio.models.generate_content_stream(
+                    model=m,
+                    contents=contents,
+                    config=config,
+                )
+                self._working_model = m
+                async for chunk in stream:
+                    if chunk.text:
+                        yield chunk.text
+                return
+            except Exception as e:
+                last_exc = e
+                err_text = str(e)
+                logger.warning("Intento de stream con modelo Gemini '%s' no disponible: %s", m, err_text[:200])
+                if any(k in err_text for k in ["404", "503", "RESOURCE_EXHAUSTED", "NOT_FOUND", "429"]):
+                    if "429" in err_text or "RESOURCE_EXHAUSTED" in err_text:
+                        await asyncio.sleep(1.0)
+                    continue
+                else:
+                    logger.error("Error no recuperable en stream de Gemini con '%s': %s", m, e, exc_info=True)
+                    raise e
+
+        logger.error("Todos los modelos candidatos de stream fallaron. Último error: %s", last_exc, exc_info=True)
+        raise last_exc
+
+    async def execute_turn_stream(
+        self,
+        db: AsyncSession,
+        user_message: str,
+        session_id: Optional[uuid.UUID] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Ejecuta el turno del agente en streaming SSE estructurado (tokens y metadata), persistiendo en PostgreSQL."""
+        active_session_id = session_id or uuid.uuid4()
+
+        # 1. Cargar historial y persistir el mensaje del usuario en PostgreSQL
+        history_query = (
+            select(ChatMessage)
+            .where(ChatMessage.session_id == active_session_id)
+            .order_by(ChatMessage.created_at.asc())
+        )
+        history_res = await db.execute(history_query)
+        prior_messages = list(history_res.scalars().all())
+
+        user_chat_record = ChatMessage(
+            session_id=active_session_id,
+            role="user",
+            content=user_message,
+            citations=[],
+            executed_tools=[],
+        )
+        db.add(user_chat_record)
+        await db.commit()
+
+        executed_tools: List[ToolExecutionRecord] = []
+        collected_citations: List[CitationItem] = []
+        full_response = ""
+
+        def _to_json_safe(data: Any) -> Any:
+            try:
+                if hasattr(data, "model_dump"):
+                    data = data.model_dump(mode="json")
+                return json.loads(json.dumps(data, default=str))
+            except Exception:
+                return str(data)
+
+        client_ready = self._ensure_client()
+        if not client_ready or not self._client:
+            fb_response = await self._execute_fallback_turn(
+                db=db,
+                user_message=user_message,
+                session_id=active_session_id,
+                prior_messages=prior_messages,
+            )
+            full_response = fb_response.response
+            collected_citations = fb_response.citations
+            executed_tools = fb_response.executed_tools
+
+            words = full_response.split(" ")
+            for i, w in enumerate(words):
+                chunk = w if i == len(words) - 1 else w + " "
+                yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+                await asyncio.sleep(0.01)
+        else:
+            try:
+                tool_defs = _get_tool_declarations()
+                gemini_tools = [types.Tool(function_declarations=tool_defs)]
+                config = types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    tools=gemini_tools,
+                    temperature=0.2,
+                )
+
+                contents: List[types.Content] = []
+                for msg in prior_messages:
+                    if msg.role == "user":
+                        contents.append(types.Content(role="user", parts=[types.Part.from_text(text=msg.content)]))
+                    elif msg.role == "assistant":
+                        contents.append(types.Content(role="model", parts=[types.Part.from_text(text=msg.content)]))
+
+                contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_message)]))
+
+                max_turns = 4
+                active_model = self.model_name
+                final_text_needed = True
+
+                for turn in range(max_turns):
+                    response, active_model = await self._call_gemini_with_fallback(
+                        contents=contents,
+                        config=config,
+                        preferred_model=active_model,
+                    )
+
+                    if not response.function_calls:
+                        if response.text:
+                            words = response.text.split(" ")
+                            for i, w in enumerate(words):
+                                chunk = w if i == len(words) - 1 else w + " "
+                                full_response += chunk
+                                yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+                                await asyncio.sleep(0.01)
+                            final_text_needed = False
+                        break
+
+                    candidate = response.candidates[0]
+                    contents.append(candidate.content)
+                    tool_response_parts = []
+
+                    for fc in response.function_calls:
+                        tool_name = fc.name
+                        tool_args = dict(fc.args) if fc.args else {}
+                        logger.info("Agente (Stream) invocando tool: %s con args: %s", tool_name, tool_args)
+
+                        tool_result, tool_citations = await self._dispatch_tool_call(
+                            db=db, tool_name=tool_name, tool_args=tool_args
+                        )
+                        if tool_citations:
+                            collected_citations.extend(tool_citations)
+
+                        executed_tools.append(
+                            ToolExecutionRecord(
+                                tool_name=tool_name,
+                                tool_input=tool_args,
+                                tool_output=tool_result,
+                            )
+                        )
+
+                        tool_response_parts.append(
+                            types.Part.from_function_response(
+                                name=tool_name,
+                                response={"result": tool_result},
+                            )
+                        )
+
+                    contents.append(types.Content(role="user", parts=tool_response_parts))
+
+                if final_text_needed:
+                    stream_config = types.GenerateContentConfig(
+                        system_instruction=SYSTEM_INSTRUCTION,
+                        temperature=0.2,
+                    )
+                    async for token in self._call_gemini_stream_with_fallback(
+                        contents=contents,
+                        config=stream_config,
+                        preferred_model=active_model,
+                    ):
+                        full_response += token
+                        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+            except Exception as e:
+                logger.error("Error crítico durante stream con Gemini: %s", e, exc_info=True)
+                error_prefix = (
+                    f"⚠️ [Aviso del sistema: La API de Gemini no respondió ({type(e).__name__}: {str(e)[:120]}...). "
+                    "Se ejecutó el procesamiento documental con el motor de contingencia.]\n\n"
+                )
+                fb_response = await self._execute_fallback_turn(
+                    db=db,
+                    user_message=user_message,
+                    session_id=active_session_id,
+                    prior_messages=prior_messages,
+                    api_error_notice=error_prefix,
+                )
+                full_response = fb_response.response
+                collected_citations = fb_response.citations
+                executed_tools = fb_response.executed_tools
+
+                words = full_response.split(" ")
+                for i, w in enumerate(words):
+                    chunk = w if i == len(words) - 1 else w + " "
+                    yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+                    await asyncio.sleep(0.01)
+
+        # 5. Emitir evento final de metadata
+        dedup_citations = self._deduplicate_citations(collected_citations)
+        citations_data = [_to_json_safe(c) for c in dedup_citations]
+        tools_data = [_to_json_safe(t) for t in executed_tools]
+
+        metadata_event = {
+            "type": "metadata",
+            "citations": citations_data,
+            "executed_tools": tools_data,
+            "session_id": str(active_session_id),
+        }
+        yield f"data: {json.dumps(metadata_event)}\n\n"
+
+        # 6. Persistir el mensaje completo en PostgreSQL
+        try:
+            assistant_chat_record = ChatMessage(
+                session_id=active_session_id,
+                role="assistant",
+                content=full_response or "Sin respuesta generada.",
+                citations=citations_data,
+                executed_tools=tools_data,
+            )
+            db.add(assistant_chat_record)
+            await db.commit()
+            logger.info("Respuesta del stream persistida exitosamente en PostgreSQL para session %s", active_session_id)
+        except Exception as err:
+            logger.error("Error al persistir mensaje de stream en PostgreSQL: %s", err, exc_info=True)
 
     async def _execute_gemini_turn(
         self,

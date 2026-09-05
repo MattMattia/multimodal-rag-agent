@@ -92,6 +92,32 @@ async def test_agent_chat_endpoint():
         assert isinstance(data["executed_tools"], list)
 
 
+@pytest.mark.asyncio
+async def test_agent_chat_stream_endpoint():
+    """Valida la respuesta en streaming (SSE) del endpoint POST /api/v1/agent/chat/stream."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        session_id = uuid.uuid4()
+        payload = {
+            "message": "Hola, genera una respuesta breve de saludo.",
+            "session_id": str(session_id),
+        }
+        async with client.stream("POST", "/api/v1/agent/chat/stream", json=payload) as resp:
+            assert resp.status_code == 200
+            content_type = resp.headers.get("content-type", "")
+            assert "text/event-stream" in content_type
+
+            events = []
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if line.startswith("data: "):
+                    events.append(line[6:].strip())
+
+            assert len(events) > 0
+            # Debe incluir al menos evento de metadata o tokens
+            assert any('"type": "metadata"' in ev or '"type": "token"' in ev for ev in events)
+
+
 def test_gemini_model_configuration():
     """Valida que los modelos de Gemini se inicialicen leyendo las variables de entorno configuradas."""
     assert settings.GEMINI_AGENT_MODEL == "gemini-1.5-pro"
