@@ -161,27 +161,12 @@ class TelemetryService:
         metadata: Optional[Dict[str, Any]] = None,
         tags: Optional[List[str]] = None,
     ) -> Any:
-        """Inicia una nueva traza raíz en Langfuse o retorna un DummyTrace si está deshabilitado."""
-        if not self.is_enabled:
+        if not self.is_enabled or not self._client:
             return DummyTrace(name=name, id=session_id or "local")
 
         meta = dict(metadata or {})
-        if session_id:
-            meta["session_id"] = str(session_id)
-        if user_id:
-            meta["user_id"] = str(user_id)
-
         try:
-            # Langfuse v4 API
-            if hasattr(self._client, "start_observation"):
-                return self._client.start_observation(
-                    name=name,
-                    as_type="agent",
-                    input=input,
-                    metadata=meta,
-                )
-            # Langfuse v2/v3 API
-            elif hasattr(self._client, "trace"):
+            if hasattr(self._client, "trace"):
                 return self._client.trace(
                     name=name,
                     session_id=str(session_id) if session_id else None,
@@ -190,8 +175,15 @@ class TelemetryService:
                     metadata=meta,
                     tags=tags or [],
                 )
+            elif hasattr(self._client, "start_observation"):
+                return self._client.start_observation(
+                    name=name,
+                    as_type="agent",
+                    input=input,
+                    metadata=meta,
+                )
         except Exception as e:
-            logger.debug("Error iniciando traza en Langfuse: %s", e)
+            logger.warning("Error iniciando traza en Langfuse: %s", e)
 
         return DummyTrace(name=name, id=session_id or "local")
 
@@ -208,25 +200,32 @@ class TelemetryService:
         start_time = time.time()
         span_obj = None
 
-        if self.is_enabled:
+        if self.is_enabled and not isinstance(parent, (DummyTrace, DummySpan)):
             try:
+                # Si el padre soporta span (Langfuse v2/v3)
+                if parent and hasattr(parent, "span"):
+                    span_obj = parent.span(
+                        name=name,
+                        input=input,
+                        metadata=metadata or {},
+                    )
                 # Si el padre soporta start_observation (Langfuse v4)
-                if parent and hasattr(parent, "start_observation") and not isinstance(parent, (DummyTrace, DummySpan)):
+                elif parent and hasattr(parent, "start_observation"):
                     span_obj = parent.start_observation(
                         name=name,
                         as_type=span_type if span_type in ("span", "tool", "chain", "agent", "retriever") else "span",
                         input=input,
                         metadata=metadata or {},
                     )
-                # Si el padre soporta span (Langfuse v2/v3)
-                elif parent and hasattr(parent, "span") and not isinstance(parent, (DummyTrace, DummySpan)):
-                    span_obj = parent.span(
+                # Si no hay padre pero el cliente soporta span directo (Langfuse v2)
+                elif parent is None and hasattr(self._client, "span"):
+                    span_obj = self._client.span(
                         name=name,
                         input=input,
                         metadata=metadata or {},
                     )
                 # Si no hay padre pero el cliente soporta start_observation (v4)
-                elif hasattr(self._client, "start_observation"):
+                elif parent is None and hasattr(self._client, "start_observation"):
                     span_obj = self._client.start_observation(
                         name=name,
                         as_type=span_type if span_type in ("span", "tool", "chain", "agent", "retriever") else "span",
@@ -265,8 +264,18 @@ class TelemetryService:
             return DummySpan(name)
 
         try:
+            # Langfuse v2/v3: parent.generation
+            if parent and hasattr(parent, "generation") and not isinstance(parent, (DummyTrace, DummySpan)):
+                return parent.generation(
+                    name=name,
+                    model=model,
+                    input=input,
+                    output=output,
+                    usage=usage,
+                    metadata=metadata or {},
+                )
             # Langfuse v4: start_observation as_type="generation"
-            if parent and hasattr(parent, "start_observation") and not isinstance(parent, (DummyTrace, DummySpan)):
+            elif parent and hasattr(parent, "start_observation") and not isinstance(parent, (DummyTrace, DummySpan)):
                 gen = parent.start_observation(
                     name=name,
                     as_type="generation",
@@ -279,16 +288,6 @@ class TelemetryService:
                 if hasattr(gen, "end"):
                     gen.end()
                 return gen
-            # Langfuse v2/v3: parent.generation
-            elif parent and hasattr(parent, "generation") and not isinstance(parent, (DummyTrace, DummySpan)):
-                return parent.generation(
-                    name=name,
-                    model=model,
-                    input=input,
-                    output=output,
-                    usage=usage,
-                    metadata=metadata or {},
-                )
         except Exception as e:
             logger.debug("Error registrando generación en Langfuse: %s", e)
 

@@ -82,13 +82,84 @@ def test_telemetry_service_disabled_mode():
     service.flush()
 
 
-def test_telemetry_service_v4_client_integration():
-    """Verifica la instrumentación con cliente mockeado de Langfuse v4 (start_observation)."""
+def test_telemetry_service_v2_client_integration():
+    """Verifica la instrumentación con cliente mockeado de Langfuse v2 (trace, span, generation)."""
     service = TelemetryService()
     service._enabled = True
 
     mock_client = MagicMock()
+    mock_trace = MagicMock()
+    mock_child = MagicMock()
+
+    mock_client.trace.return_value = mock_trace
+    mock_trace.span.return_value = mock_child
+
+    service._client = mock_client
+    assert service.is_enabled
+
+    # 1. Iniciar traza raíz
+    trace = service.start_trace(
+        name="agent_turn",
+        session_id="test-session-42",
+        input={"query": "test query"},
+    )
+    mock_client.trace.assert_called_once_with(
+        name="agent_turn",
+        session_id="test-session-42",
+        user_id=None,
+        input={"query": "test query"},
+        metadata={},
+        tags=[],
+    )
+    assert trace == mock_trace
+
+    # 2. Instrumentar span hijo con context manager
+    with service.span(parent=trace, name="tool:search", span_type="tool", input={"query": "test"}) as s:
+        assert s == mock_child
+        mock_trace.span.assert_called_with(
+            name="tool:search",
+            input={"query": "test"},
+            metadata={},
+        )
+    mock_child.end.assert_called_once()
+
+    # 3. Registrar generación
+    mock_gen = MagicMock()
+    mock_trace.generation.return_value = mock_gen
+    gen = service.record_generation(
+        parent=trace,
+        name="gemini_turn_0",
+        model="gemini-1.5-pro",
+        input="pregunta",
+        output="respuesta",
+        usage={"input": 10, "output": 20, "total": 30},
+    )
+    mock_trace.generation.assert_called_with(
+        name="gemini_turn_0",
+        model="gemini-1.5-pro",
+        input="pregunta",
+        output="respuesta",
+        usage={"input": 10, "output": 20, "total": 30},
+        metadata={},
+    )
+
+    # 4. Flush
+    service.flush()
+    mock_client.flush.assert_called_once()
+
+
+def test_telemetry_service_v4_client_integration():
+    """Verifica la instrumentación con cliente mockeado de Langfuse v4 (start_observation sin trace)."""
+    service = TelemetryService()
+    service._enabled = True
+
+    mock_client = MagicMock()
+    del mock_client.trace  # Asegurar que no tenga trace
+
     mock_obs = MagicMock()
+    del mock_obs.span
+    del mock_obs.generation
+
     mock_child = MagicMock()
 
     mock_client.start_observation.return_value = mock_obs
@@ -107,7 +178,7 @@ def test_telemetry_service_v4_client_integration():
         name="agent_turn",
         as_type="agent",
         input={"query": "test query"},
-        metadata={"session_id": "test-session-42"},
+        metadata={},
     )
     assert trace == mock_obs
 
@@ -155,6 +226,7 @@ def test_telemetry_service_exception_resilience():
     service._enabled = True
 
     failing_client = MagicMock()
+    failing_client.trace.side_effect = RuntimeError("Langfuse API unreachable")
     failing_client.start_observation.side_effect = RuntimeError("Langfuse API unreachable")
     failing_client.flush.side_effect = RuntimeError("Network error")
 
