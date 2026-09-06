@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.telemetry import telemetry_service
 from app.models.chat import ChatMessage
 from app.schemas.agent import AgentChatResponse, CitationItem, ToolExecutionRecord
 from app.tools.pdf_generator import execute_generate_report_pdf
@@ -161,6 +162,14 @@ class AutonomousAgentService:
         """Ejecuta un turno completo de interacción con el agente autónomo y persiste la memoria en PostgreSQL."""
         active_session_id = session_id or uuid.uuid4()
 
+        # Iniciar traza raíz de telemetría (Langfuse)
+        trace = telemetry_service.start_trace(
+            name="agent_chat_turn",
+            session_id=str(active_session_id),
+            input={"user_message": user_message},
+            metadata={"interface": "api", "mode": "sync"},
+        )
+
         # 1. Cargar historial conversacional previo para esta sesión desde PostgreSQL
         history_query = (
             select(ChatMessage)
@@ -190,6 +199,7 @@ class AutonomousAgentService:
                 user_message=user_message,
                 session_id=active_session_id,
                 prior_messages=prior_messages,
+                trace=trace,
             )
         else:
             try:
@@ -198,6 +208,7 @@ class AutonomousAgentService:
                     user_message=user_message,
                     session_id=active_session_id,
                     prior_messages=prior_messages,
+                    trace=trace,
                 )
             except Exception as e:
                 logger.error("Error crítico al invocar la API de Gemini: %s", e, exc_info=True)
@@ -211,6 +222,7 @@ class AutonomousAgentService:
                     session_id=active_session_id,
                     prior_messages=prior_messages,
                     api_error_notice=error_prefix,
+                    trace=trace,
                 )
 
         # 4. Persistir la respuesta final del asistente en PostgreSQL
@@ -234,6 +246,22 @@ class AutonomousAgentService:
         )
         db.add(assistant_chat_record)
         await db.commit()
+
+        # 5. Actualizar traza en Langfuse y registrar métricas de turno
+        try:
+            if hasattr(trace, "update"):
+                trace.update(
+                    output={
+                        "response": chat_response.response,
+                        "citations_count": len(chat_response.citations),
+                        "tools_count": len(chat_response.executed_tools),
+                    }
+                )
+            if hasattr(trace, "end"):
+                trace.end()
+            telemetry_service.flush()
+        except Exception as e:
+            logger.debug("Error cerrando traza de telemetría: %s", e)
 
         return chat_response
 
@@ -347,6 +375,14 @@ class AutonomousAgentService:
         """Ejecuta el turno del agente en streaming SSE estructurado (tokens y metadata), persistiendo en PostgreSQL."""
         active_session_id = session_id or uuid.uuid4()
 
+        # Iniciar traza raíz de telemetría (Langfuse)
+        trace = telemetry_service.start_trace(
+            name="agent_chat_stream_turn",
+            session_id=str(active_session_id),
+            input={"user_message": user_message},
+            metadata={"interface": "api", "mode": "stream"},
+        )
+
         # 1. Cargar historial y persistir el mensaje del usuario en PostgreSQL
         history_query = (
             select(ChatMessage)
@@ -385,6 +421,7 @@ class AutonomousAgentService:
                 user_message=user_message,
                 session_id=active_session_id,
                 prior_messages=prior_messages,
+                trace=trace,
             )
             full_response = fb_response.response
             collected_citations = fb_response.citations
@@ -448,6 +485,18 @@ class AutonomousAgentService:
                         tool_result, tool_citations = await self._dispatch_tool_call(
                             db=db, tool_name=tool_name, tool_args=tool_args
                         )
+                        with telemetry_service.span(
+                            parent=trace,
+                            name=f"tool:{tool_name}",
+                            span_type="tool",
+                            input=tool_args,
+                        ) as tool_span:
+                            tool_result, tool_citations = await self._dispatch_tool_call(
+                                db=db, tool_name=tool_name, tool_args=tool_args
+                            )
+                            if hasattr(tool_span, "update"):
+                                tool_span.update(output=tool_result)
+
                         if tool_citations:
                             collected_citations.extend(tool_citations)
 
@@ -481,6 +530,15 @@ class AutonomousAgentService:
                         full_response += token
                         yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 
+                    telemetry_service.record_generation(
+                        parent=trace,
+                        name="gemini_stream_synthesis",
+                        model=active_model,
+                        input=user_message,
+                        output=full_response,
+                        metadata={"stream": True},
+                    )
+
             except Exception as e:
                 logger.error("Error crítico durante stream con Gemini: %s", e, exc_info=True)
                 error_prefix = (
@@ -493,6 +551,7 @@ class AutonomousAgentService:
                     session_id=active_session_id,
                     prior_messages=prior_messages,
                     api_error_notice=error_prefix,
+                    trace=trace,
                 )
                 full_response = fb_response.response
                 collected_citations = fb_response.citations
@@ -532,12 +591,29 @@ class AutonomousAgentService:
         except Exception as err:
             logger.error("Error al persistir mensaje de stream en PostgreSQL: %s", err, exc_info=True)
 
+        # 7. Finalizar y sincronizar traza de telemetría
+        try:
+            if hasattr(trace, "update"):
+                trace.update(
+                    output={
+                        "response": full_response,
+                        "citations_count": len(citations_data),
+                        "tools_count": len(tools_data),
+                    }
+                )
+            if hasattr(trace, "end"):
+                trace.end()
+            telemetry_service.flush()
+        except Exception as e:
+            logger.debug("Error cerrando traza de telemetría en stream: %s", e)
+
     async def _execute_gemini_turn(
         self,
         db: AsyncSession,
         user_message: str,
         session_id: uuid.UUID,
         prior_messages: List[ChatMessage],
+        trace: Optional[Any] = None,
     ) -> AgentChatResponse:
         """Ejecuta el ciclo ReAct y Function Calling con el modelo Gemini configurado."""
         executed_tools: List[ToolExecutionRecord] = []
@@ -590,6 +666,24 @@ class AutonomousAgentService:
                 preferred_model=active_model,
             )
 
+            # Registrar generación LLM en telemetría
+            usage_dict = None
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                usage_dict = {
+                    "input": getattr(response.usage_metadata, "prompt_token_count", 0) or 0,
+                    "output": getattr(response.usage_metadata, "candidates_token_count", 0) or 0,
+                    "total": getattr(response.usage_metadata, "total_token_count", 0) or 0,
+                }
+            telemetry_service.record_generation(
+                parent=trace,
+                name=f"gemini_turn_{turn}",
+                model=active_model,
+                input=user_message if turn == 0 else f"react_turn_{turn}",
+                output=response.text if hasattr(response, "text") and response.text else [fc.name for fc in (response.function_calls or [])],
+                usage=usage_dict,
+                metadata={"turn": turn},
+            )
+
             # Si el modelo no solicitó llamadas a funciones, obtuvimos la respuesta final
             if not response.function_calls:
                 final_answer = response.text or "Sin respuesta generada por el modelo."
@@ -610,6 +704,18 @@ class AutonomousAgentService:
                 tool_result, tool_citations = await self._dispatch_tool_call(
                     db=db, tool_name=tool_name, tool_args=tool_args
                 )
+                # Ejecutar la herramienta correspondiente dentro de un span de telemetría
+                with telemetry_service.span(
+                    parent=trace,
+                    name=f"tool:{tool_name}",
+                    span_type="tool",
+                    input=tool_args,
+                ) as tool_span:
+                    tool_result, tool_citations = await self._dispatch_tool_call(
+                        db=db, tool_name=tool_name, tool_args=tool_args
+                    )
+                    if hasattr(tool_span, "update"):
+                        tool_span.update(output=tool_result)
 
                 if tool_citations:
                     collected_citations.extend(tool_citations)
@@ -699,6 +805,7 @@ class AutonomousAgentService:
         session_id: uuid.UUID,
         prior_messages: Optional[List[ChatMessage]] = None,
         api_error_notice: str = "",
+        trace: Optional[Any] = None,
     ) -> AgentChatResponse:
         """Modo determinístico de respaldo para desarrollo local y pruebas unitarias sin API key activa."""
         msg_lower = user_message.lower()
@@ -726,6 +833,16 @@ class AutonomousAgentService:
         rag_context = ""
         if needs_search:
             search_res = await execute_search_knowledge_base(db=db, query=search_query, top_k=3)
+            with telemetry_service.span(
+                parent=trace,
+                name="tool:search_knowledge_base",
+                span_type="tool",
+                input={"query": search_query, "top_k": 3},
+            ) as tool_span:
+                search_res = await execute_search_knowledge_base(db=db, query=search_query, top_k=3)
+                if hasattr(tool_span, "update"):
+                    tool_span.update(output={"total_found": search_res.get("total_found", 0)})
+
             rag_context = search_res.get("context_text", "")
             raw_citations = search_res.get("citations", [])
 
@@ -777,6 +894,18 @@ class AutonomousAgentService:
             pdf_info = execute_generate_report_pdf(
                 title=pdf_title, summary=pdf_summary, key_points=key_points
             )
+            with telemetry_service.span(
+                parent=trace,
+                name="tool:generate_report_pdf",
+                span_type="tool",
+                input={"title": pdf_title, "summary": pdf_summary},
+            ) as tool_span:
+                pdf_info = execute_generate_report_pdf(
+                    title=pdf_title, summary=pdf_summary, key_points=key_points
+                )
+                if hasattr(tool_span, "update"):
+                    tool_span.update(output=pdf_info)
+
             executed_tools.append(
                 ToolExecutionRecord(
                     tool_name="generate_report_pdf",
@@ -792,6 +921,16 @@ class AutonomousAgentService:
             event_type = "user_alert"
             payload = {"query": user_message, "alert_triggered": True}
             webhook_info = await execute_dispatch_webhook(event_type=event_type, payload=payload)
+            with telemetry_service.span(
+                parent=trace,
+                name="tool:dispatch_webhook",
+                span_type="tool",
+                input={"event_type": event_type, "payload": payload},
+            ) as tool_span:
+                webhook_info = await execute_dispatch_webhook(event_type=event_type, payload=payload)
+                if hasattr(tool_span, "update"):
+                    tool_span.update(output=webhook_info)
+
             executed_tools.append(
                 ToolExecutionRecord(
                     tool_name="dispatch_webhook",

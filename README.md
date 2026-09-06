@@ -7,6 +7,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Google Gemini](https://img.shields.io/badge/Google_Gemini-GenAI_SDK-8E75B2?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.40+-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![Langfuse](https://img.shields.io/badge/Langfuse-Observability-000000?style=for-the-badge&logo=langfuse&logoColor=white)](https://langfuse.com/)
 [![Docker](https://img.shields.io/badge/Docker_Compose-Containerized-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
 
 **Desarrollado por [Mattia Risso](https://github.com/MattMattia)**  
@@ -18,9 +19,9 @@
 
 ## 📌 1. Visión Ejecutiva
 
-Sistema de Inteligencia Artificial empresarial de extremo a extremo que combina un pipeline de **Ingesta y Extracción Multimodal**, **Búsqueda Híbrida Avanzada (Dense Vector + Full-Text Search)** y un **Agente IA Autónomo ReAct** con catálogo de herramientas dinámicas (Function Calling) y memoria conversacional persistente.
+Sistema de Inteligencia Artificial empresarial de extremo a extremo que combina un pipeline de **Ingesta y Extracción Multimodal**, **Búsqueda Híbrida Avanzada (Dense Vector + Full-Text Search)**, **Reranking Semántico con LLM** y un **Agente IA Autónomo ReAct** con catálogo de herramientas dinámicas (Function Calling), memoria conversacional persistente y **Observabilidad de Nivel Empresarial con Langfuse**.
 
-El sistema procesa documentos no estructurados y de alta complejidad (PDFs con maquetación heterogénea, tablas formateadas, diagramas técnicos y recibos/facturas), vectoriza el conocimiento preservando la jerarquía contextual mediante **Parent-Child Chunking**, y habilita la toma de decisiones autónoma mediante razonamiento multi-paso, generación dinámica de reportes ejecutivos en PDF y despacho de eventos vía webhooks.
+El sistema procesa documentos no estructurados y de alta complejidad (PDFs con maquetación heterogénea, tablas formateadas, diagramas técnicos y recibos/facturas), vectoriza el conocimiento preservando la jerarquía contextual mediante **Parent-Child Chunking**, y habilita la toma de decisiones autónoma mediante razonamiento multi-paso, generación dinámica de reportes ejecutivos en PDF, despacho de eventos vía webhooks y monitoreo en tiempo real de tokens y latencias.
 
 ---
 
@@ -29,19 +30,23 @@ El sistema procesa documentos no estructurados y de alta complejidad (PDFs con m
 ```mermaid
 flowchart TB
     subgraph UI ["Capa de Presentación (Frontend)"]
-        Streamlit["🖥️ Streamlit Dashboard (:8501)\n• Chat Multi-Turno & Citas\n• Drag & Drop Multimodal\n• Descarga Binaria de Reportes"]
+        Streamlit["🖥️ Streamlit Dashboard (:8501)\n• Chat Multi-Turno & Streaming SSE\n• Drag & Drop Multimodal\n• Descarga Binaria de Reportes"]
     end
 
     subgraph Gateway ["Capa de Aplicación (FastAPI Backend :8000)"]
-        API["⚡ FastAPI API Gateway\n• REST Endpoints (/v1)\n• Background Tasks Ingestion\n• Exception Handling & Logging"]
+        API["⚡ FastAPI API Gateway\n• REST Endpoints (/v1) & SSE Stream\n• Background Tasks Ingestion\n• Telemetry & Exception Handling"]
         Repo["📦 Repository Layer (Clean Architecture)\n• DocumentRepo • ChatRepo"]
+    end
+
+    subgraph Observability ["Observabilidad & Telemetría (:3000)"]
+        Langfuse["📊 Langfuse Dashboard\n• Traces & Turn Spans\n• RRF & Reranker Latencies\n• Token Cost & Usage Metrics"]
     end
 
     subgraph AgentEngine ["Core del Agente Autónomo (ReAct)"]
         Agent["🧠 Autonomous Agent Service\n• Gemini 1.5 Pro / 3.6 Flash Cascade\n• Thought-Action-Observation Loop\n• Citations Extractor & Validator"]
         
         subgraph ToolsCatalog ["Catálogo de Herramientas (Function Calling)"]
-            T1["🔍 search_knowledge_base\n(Hybrid RAG pgvector)"]
+            T1["🔍 search_knowledge_base\n(Hybrid RAG + Reranking)"]
             T2["📄 generate_report_pdf\n(ReportLab Dynamic Engine)"]
             T3["🔔 dispatch_webhook\n(HTTPX Async Dispatcher)"]
         end
@@ -56,13 +61,14 @@ flowchart TB
 
     subgraph DataStore ["Capa de Persistencia (PostgreSQL 16 + pgvector :5432)"]
         PGVector["🗄️ Vector Store\n• HNSW Cosine Index (document_chunks.embedding)\n• GIN Full-Text Search Index (Spanish tsvector)"]
-        Relational["💾 Tablas Relacionales\n• documents • chat_messages (JSONB)"]
+        Relational["💾 Tablas Relacionales\n• documents • chat_messages (JSONB) • langfuse_db"]
     end
 
-    Streamlit <-->|HTTP REST / JSON| API
+    Streamlit <-->|HTTP REST & SSE Stream| API
     API --> Repo
     API --> Agent
     API --> MultimodalPipeline
+    API -.->|Traces & Spans| Langfuse
     
     MultimodalPipeline --> PDFParser
     MultimodalPipeline --> Vision
@@ -71,11 +77,12 @@ flowchart TB
     Embedder -->|Batch Insert + Vectors| PGVector
 
     Agent <-->|Invocación Dinámica| ToolsCatalog
-    T1 <-->|Reciprocal Rank Fusion (RRF)| PGVector
+    T1 <-->|RRF + Semantic Rerank| PGVector
     T2 -->|Almacenamiento Físico| DiskReports["📂 uploads/reports/*.pdf"]
     T3 -->|POST Event Payload| WebhookTarget["🌐 External Services / Slack"]
 
     Agent <-->|Historial & Sesión| Relational
+    Langfuse -->|Persistencia de Métricas| Relational
 ```
 
 ---
@@ -123,6 +130,15 @@ flowchart TB
   * Reduce la selección a los mejores `top_k` y expande el contexto al fragmento padre (`Parent-Document Retrieval`).
   * **Fallback determinístico:** Ante timeouts o indisponibilidad de API, preserva de forma transparente el orden RRF original sin degradar el servicio.
 
+#### 8. Observabilidad y Telemetría de LLM con Langfuse
+* **Desafío:** Monitorear el comportamiento autónomo del agente ReAct en entornos de producción: auditar qué herramientas ejecuta, qué fragmentos recupera, la latencia de cada etapa y el consumo exacto de tokens y costos sin penalizar el rendimiento ni bloquear el flujo del usuario.
+* **Solución:** Módulo desacoplado `TelemetryService` (`app/core/telemetry.py`):
+  * **Contenedor auto-hospedado:** Servicio web de Langfuse integrado en `docker-compose.yml` (`:3000`) con persistencia en PostgreSQL (`langfuse_db`).
+  * **Trazabilidad de Turnos:** Cada consulta del usuario genera un `Trace` raíz asociando el `session_id`.
+  * **Spans de Ejecución:** Instrumentación contextual automática de herramientas (`search_knowledge_base`, `generate_report_pdf`, `dispatch_webhook`), búsqueda vectorial RRF y la fase de reranking semántico.
+  * **Métricas de Generación:** Registro granular de modelos Gemini invocados, prompts procesados, tokens de entrada/salida y latencia en segundos.
+  * **Resiliencia Total (No-Op Fallback):** Si Langfuse está deshabilitado (`LANGFUSE_ENABLED=false`) o el servidor está temporalmente inaccesible, `DummyTrace` y `DummySpan` garantizan latencia 0 ms sin arrojar excepciones al cliente.
+
 ---
 
 ## 🚀 4. Guía de Inicio Rápido (3 Pasos)
@@ -148,6 +164,12 @@ GOOGLE_API_KEY="AIzaSy..."
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 POSTGRES_DB=rag_multimodal
+
+# Observabilidad (Opcional - Langfuse)
+LANGFUSE_ENABLED=false
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=http://langfuse:3000
 ```
 
 ### Paso 3: Desplegar la Infraestructura con Docker Compose
@@ -157,6 +179,7 @@ docker compose up -d --build
 Una vez levantado:
 * **Frontend Interactivo (Streamlit):** [http://localhost:8501](http://localhost:8501)
 * **API REST & Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs)
+* **Dashboard de Observabilidad (Langfuse):** [http://localhost:3000](http://localhost:3000)
 * **Base de Datos PostgreSQL + pgvector:** `localhost:5432`
 
 ---
@@ -169,7 +192,7 @@ Una vez levantado:
 | `POST` | `/api/v1/documents/upload` | Ingesta de archivos PDF/Imágenes (procesamiento asíncrono) |
 | `GET` | `/api/v1/documents` | Listado de documentos indexados con estado y recuento de chunks |
 | `GET` | `/api/v1/documents/{id}` | Detalle de un documento y fragmentos generados |
-| `POST` | `/api/v1/search` | Búsqueda Híbrida (`query`, `limit`, filtros de metadata) |
+| `POST` | `/api/v1/search` | Búsqueda Híbrida (`query`, `limit`, filtros de metadata, reranking) |
 | `POST` | `/api/v1/agent/chat` | Interacción multi-turno con el Agente Autónomo ReAct |
 | `POST` | `/api/v1/agent/chat/stream` | Respuestas en Streaming en tiempo real (Server-Sent Events) |
 | `GET` | `/api/v1/agent/sessions/{session_id}/history` | Historial persistido de una conversación |
@@ -179,7 +202,7 @@ Una vez levantado:
 
 ## 🧪 6. Ejecución de la Suite de Pruebas
 
-El sistema incluye una batería exhaustiva de **19 pruebas automatizadas** que validan la ingesta multimodal, el chunking jerárquico, la búsqueda híbrida con RRF, el streaming SSE, la persistencia en base de datos y el bucle ReAct del agente:
+El sistema incluye una batería exhaustiva de **29 pruebas automatizadas** que validan la ingesta multimodal, el chunking jerárquico, la búsqueda híbrida con RRF, el reranking semántico, el streaming SSE, la telemetría resiliente, la persistencia en base de datos y el bucle ReAct del agente:
 
 ```bash
 docker compose exec api pytest -v
@@ -187,27 +210,37 @@ docker compose exec api pytest -v
 
 **Resultado de Ejecución:**
 ```
-tests/test_agent.py::test_generate_report_pdf PASSED                     [  5%]
-tests/test_agent.py::test_dispatch_webhook PASSED                        [ 10%]
-tests/test_agent.py::test_agent_execution_turn PASSED                    [ 15%]
-tests/test_agent.py::test_agent_chat_endpoint PASSED                     [ 21%]
-tests/test_agent.py::test_agent_chat_stream_endpoint PASSED              [ 26%]
-tests/test_agent.py::test_gemini_model_configuration PASSED              [ 31%]
-tests/test_agent.py::test_chat_session_memory_persistence PASSED         [ 36%]
-tests/test_documents.py::test_table_to_markdown PASSED                   [ 42%]
-tests/test_documents.py::test_table_to_markdown_empty PASSED             [ 47%]
-tests/test_documents.py::test_hierarchical_chunker PASSED                [ 52%]
-tests/test_documents.py::test_upload_unsupported_format PASSED           [ 57%]
-tests/test_documents.py::test_vision_placeholder_without_key PASSED      [ 63%]
-tests/test_health.py::test_root_endpoint PASSED                          [ 68%]
-tests/test_health.py::test_root_health_endpoint PASSED                   [ 73%]
-tests/test_search.py::test_embedding_dimensions PASSED                   [ 78%]
-tests/test_search.py::test_embedding_batch_generation PASSED             [ 84%]
-tests/test_search.py::test_reciprocal_rank_fusion_logic PASSED           [ 89%]
-tests/test_search.py::test_search_endpoint_validation PASSED             [ 94%]
-tests/test_search.py::test_search_endpoint_hybrid PASSED                 [100%]
+tests/test_agent.py::test_generate_report_pdf PASSED                     [  3%]
+tests/test_agent.py::test_dispatch_webhook PASSED                        [  6%]
+tests/test_agent.py::test_agent_execution_turn PASSED                    [ 10%]
+tests/test_agent.py::test_agent_chat_endpoint PASSED                     [ 13%]
+tests/test_agent.py::test_agent_chat_stream_endpoint PASSED              [ 17%]
+tests/test_agent.py::test_gemini_model_configuration PASSED              [ 20%]
+tests/test_agent.py::test_chat_session_memory_persistence PASSED         [ 24%]
+tests/test_documents.py::test_table_to_markdown PASSED                   [ 27%]
+tests/test_documents.py::test_table_to_markdown_empty PASSED             [ 31%]
+tests/test_documents.py::test_hierarchical_chunker PASSED                [ 34%]
+tests/test_documents.py::test_upload_unsupported_format PASSED           [ 37%]
+tests/test_documents.py::test_vision_placeholder_without_key PASSED      [ 41%]
+tests/test_health.py::test_root_endpoint PASSED                          [ 44%]
+tests/test_health.py::test_root_health_endpoint PASSED                   [ 48%]
+tests/test_reranker.py::test_reranker_empty_list PASSED                  [ 51%]
+tests/test_reranker.py::test_reranker_single_candidate PASSED            [ 55%]
+tests/test_reranker.py::test_reranker_deterministic_fallback_on_exception PASSED [ 58%]
+tests/test_reranker.py::test_reranker_successful_reordering PASSED       [ 62%]
+tests/test_reranker.py::test_parse_scoring_json_formats PASSED           [ 65%]
+tests/test_search.py::test_embedding_dimensions PASSED                   [ 68%]
+tests/test_search.py::test_embedding_batch_generation PASSED             [ 72%]
+tests/test_search.py::test_reciprocal_rank_fusion_logic PASSED           [ 75%]
+tests/test_search.py::test_search_endpoint_validation PASSED             [ 79%]
+tests/test_search.py::test_search_endpoint_hybrid PASSED                 [ 82%]
+tests/test_search.py::test_search_endpoint_with_rerank_disabled PASSED   [ 86%]
+tests/test_telemetry.py::test_dummy_span_and_trace_resilience PASSED     [ 89%]
+tests/test_telemetry.py::test_telemetry_service_disabled_mode PASSED     [ 93%]
+tests/test_telemetry.py::test_telemetry_service_v4_client_integration PASSED [ 96%]
+tests/test_telemetry.py::test_telemetry_service_exception_resilience PASSED [100%]
 
-============================= 19 passed in 57.59s ==============================
+======================== 29 passed in 88.60s =========================
 ```
 
 ---
@@ -219,14 +252,15 @@ tests/test_search.py::test_search_endpoint_hybrid PASSED                 [100%]
 │   ├── api/
 │   │   └── v1/
 │   │       ├── endpoints/
-│   │       │   ├── agent.py       # Endpoints de chat y consulta de historial
+│   │       │   ├── agent.py       # Endpoints de chat síncrono y streaming SSE
 │   │       │   ├── documents.py   # Ingesta, subida y consulta documental
 │   │       │   ├── health.py      # Monitoreo y readiness checks
-│   │       │   └── search.py      # Búsqueda híbrida vectorial + texto
+│   │       │   └── search.py      # Búsqueda híbrida vectorial + texto + rerank
 │   │       └── router.py          # Enrutador centralizado v1
 │   ├── core/
 │   │   ├── config.py              # Pydantic BaseSettings (variables de entorno)
-│   │   └── database.py            # Engine asyncpg, SessionMaker e inicialización DDL
+│   │   ├── database.py            # Engine asyncpg, SessionMaker e inicialización DDL
+│   │   └── telemetry.py           # Servicio Singleton de Observabilidad con Langfuse
 │   ├── models/                    # Modelos ORM SQLAlchemy
 │   │   ├── chat.py                # ChatMessage (memoria relacional JSONB)
 │   │   └── document.py            # Document, DocumentChunk (pgvector), DocumentImage
@@ -242,6 +276,7 @@ tests/test_search.py::test_search_endpoint_hybrid PASSED                 [100%]
 │   │   ├── embedding.py           # Servicio de vectorización (text-embedding-004)
 │   │   ├── hybrid_search.py       # Algoritmo RRF sobre HNSW + GIN Full-Text
 │   │   ├── ingestion.py           # Pipeline de extracción, OCR y chunking jerárquico
+│   │   ├── reranker.py            # Servicio de Reranking Semántico con Gemini
 │   │   └── vision.py              # Extracción visual de diagramas y facturas
 │   ├── tools/                     # Herramientas ejecutables por el Agente
 │   │   ├── pdf_generator.py       # Generador de informes PDF con ReportLab
@@ -249,13 +284,18 @@ tests/test_search.py::test_search_endpoint_hybrid PASSED                 [100%]
 │   │   └── webhook_tool.py        # Disparador asíncrono de webhooks HTTP
 │   └── main.py                    # Punto de entrada de la aplicación FastAPI
 ├── docker/
-│   └── init.sql                   # Extensiones PostgreSQL (uuid-ossp, vector)
+│   └── init.sql                   # Extensiones PostgreSQL y base de datos langfuse
 ├── frontend/
 │   ├── app.py                     # Dashboard de usuario en Streamlit
 │   ├── Dockerfile
-│   └── requirements.txt
 ├── tests/                         # Batería de pruebas unitarias y de integración
-├── docker-compose.yml             # Orquestación multicontenedor
+│   ├── test_agent.py              # Agente ReAct, Function Calling, memoria y streaming
+│   ├── test_documents.py          # Extracción multimodal, tablas y chunking
+│   ├── test_health.py             # Endpoints de salud y base de datos
+│   ├── test_reranker.py           # Scoring semántico y fallback determinístico
+│   ├── test_search.py             # Embeddings, RRF y búsqueda híbrida
+│   └── test_telemetry.py          # DummySpan, DummyTrace y cliente Langfuse
+├── docker-compose.yml             # Orquestación multicontenedor (api, frontend, db, langfuse)
 ├── Dockerfile                     # Imagen de backend optimizada
 ├── requirements.txt               # Dependencias Python
 └── README.md                      # Documentación ejecutiva del proyecto

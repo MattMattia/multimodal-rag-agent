@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     GEMINI_AGENT_MODEL: str = "gemini-1.5-pro"
     GEMINI_VISION_MODEL: str = "gemini-1.5-flash"
 
+    # Langfuse / Observabilidad y Telemetría
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = "http://langfuse:3000"
+    LANGFUSE_ENABLED: bool = False
+
     # CORS
     ALLOWED_ORIGINS: List[str] = ["*"]
 
