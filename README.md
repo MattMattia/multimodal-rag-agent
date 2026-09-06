@@ -111,6 +111,18 @@ flowchart TB
 * **Desafío:** Generación de informes sin recurrir a plantillas fijas estáticas.
 * **Solución:** La herramienta `generate_report_pdf` recibe argumentos dinámicos formulados por el LLM tras analizar el corpus: título contextualizado, síntesis ejecutiva estructurada y puntos de acción concretos, entregando el archivo listo para descarga directa.
 
+### 6. Streaming en Tiempo Real (SSE) en FastAPI y Streamlit
+* **Desafío:** La latencia percibida en respuestas generativas complejas con invocación multi-herramienta.
+* **Solución:** Endpoint `POST /api/v1/agent/chat/stream` que emite Server-Sent Events (SSE) estructurados (`token` y `metadata`), consumido progresivamente por Streamlit con `st.write_stream` para una experiencia interactiva sin fricciones.
+
+### 7. Reranking Semántico Posterior a RRF
+* **Desafío:** Aunque RRF combina de manera equilibrada señales densas y esparsas, fragmentos que contienen palabras clave pero no responden semánticamente a la intención del usuario pueden posicionarse alto en el ranking inicial.
+* **Solución:** `RerankerService` implementa una etapa de scoring semántico posterior a RRF:
+  * Recupera una ventana extendida de candidatos (`top_k * 3`).
+  * Califica la relevancia semántica de cada fragmento (escala 0.0 a 1.0) mediante Gemini, asignando `rerank_score`.
+  * Reduce la selección a los mejores `top_k` y expande el contexto al fragmento padre (`Parent-Document Retrieval`).
+  * **Fallback determinístico:** Ante timeouts o indisponibilidad de API, preserva de forma transparente el orden RRF original sin degradar el servicio.
+
 ---
 
 ## 🚀 4. Guía de Inicio Rápido (3 Pasos)

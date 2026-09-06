@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.document import Document, DocumentChunk
 from app.schemas.search import SearchRequest, SearchResponse, SearchResultItem
 from app.services.embedding import embedding_service
+from app.services.reranker import reranker_service
 
 logger = logging.getLogger(__name__)
 
@@ -82,19 +83,32 @@ class HybridSearchService:
 
         # 5. Fusión y ranking según modo
         if request.mode == "dense":
-            final_ranked = dense_items[:top_k]
+            fused_candidates = dense_items
         elif request.mode == "sparse":
-            final_ranked = sparse_items[:top_k]
+            fused_candidates = sparse_items
         else:  # hybrid
-            final_ranked = self._apply_rrf(dense_items, sparse_items)[:top_k]
+            fused_candidates = self._apply_rrf(dense_items, sparse_items)
+
+        # Si se solicita reranking semántico (por defecto True):
+        # Tomar una ventana más amplia de candidatos (top_k * 3) y pasarlos por RerankerService
+        if getattr(request, "rerank", True) and fused_candidates:
+            candidate_window = fused_candidates[: top_k * 3]
+            final_ranked = await reranker_service.rerank(
+                query=query_text,
+                candidates=candidate_window,
+                top_n=top_k,
+            )
+        else:
+            final_ranked = fused_candidates[:top_k]
 
         # 6. Enriquecimiento jerárquico con Parent-Document Context
         if request.include_parent:
-            await self._attach_parent_context(db=db, ranked_items=final_ranked)
+            await self.attach_parent_context(db=db, ranked_items=final_ranked)
 
         # 7. Mapear a respuesta Pydantic
         results = []
         for rank, item in enumerate(final_ranked, start=1):
+            raw_rerank = item.get("rerank_score")
             results.append(
                 SearchResultItem(
                     chunk_id=item["chunk_id"],
@@ -106,6 +120,7 @@ class HybridSearchService:
                     chunk_type=item["chunk_type"],
                     page_number=item.get("page_number"),
                     score=round(float(item["score"]), 6),
+                    rerank_score=round(float(raw_rerank), 4) if raw_rerank is not None else None,
                     rank=rank,
                     metadata=item.get("metadata", {}),
                 )
@@ -277,7 +292,7 @@ class HybridSearchService:
 
         return fused_items
 
-    async def _attach_parent_context(
+    async def attach_parent_context(
         self, db: AsyncSession, ranked_items: List[Dict[str, Any]]
     ) -> None:
         """Carga en una sola consulta el contenido del fragmento padre (Parent-Document Retrieval)."""
@@ -300,6 +315,8 @@ class HybridSearchService:
             p_id = item.get("parent_id")
             if p_id and p_id in parent_map:
                 item["parent_content"] = parent_map[p_id]
+
+    _attach_parent_context = attach_parent_context
 
 
 hybrid_search_service = HybridSearchService()

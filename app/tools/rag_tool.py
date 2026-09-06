@@ -37,6 +37,7 @@ async def execute_search_knowledge_base(
         mode=mode,
         filter_document_id=filter_document_id,
         include_parent=True,
+        rerank=True,
     )
 
     response = await hybrid_search_service.search(db=db, request=request)
@@ -45,22 +46,24 @@ async def execute_search_knowledge_base(
     context_blocks: List[str] = []
 
     for idx, item in enumerate(response.results, start=1):
-        # Guardar cita estructurada
+        # Guardar cita estructurada con trazabilidad de relevancia
         citations.append(
             {
                 "document_name": item.document_name,
                 "page_number": item.page_number,
                 "chunk_type": item.chunk_type,
                 "chunk_id": item.chunk_id,
+                "rerank_score": item.rerank_score,
             }
         )
 
         # Si existe fragmento padre con mayor contexto, incorporarlo
         display_content = item.parent_content if item.parent_content else item.content
         page_str = f"Pág {item.page_number}" if item.page_number else "Sin pág"
+        score_tag = f", Relevancia: {item.rerank_score:.2f}" if item.rerank_score is not None else ""
 
         block = (
-            f"--- [Fuente #{idx}: {item.document_name} ({page_str}, Tipo: {item.chunk_type})] ---\n"
+            f"--- [Fuente #{idx}: {item.document_name} ({page_str}, Tipo: {item.chunk_type}{score_tag})] ---\n"
             f"{display_content}\n"
         )
         context_blocks.append(block)

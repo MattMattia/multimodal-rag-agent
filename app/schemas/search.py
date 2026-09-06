@@ -23,6 +23,10 @@ class SearchRequest(BaseModel):
         True,
         description="Si es True y el fragmento recuperado es hijo, incluye el contexto completo del fragmento padre",
     )
+    rerank: bool = Field(
+        True,
+        description="Si es True, aplica una etapa de Reranking Semántico con Gemini posterior a la fusión RRF",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -32,6 +36,7 @@ class SearchRequest(BaseModel):
                 "filter_document_id": None,
                 "mode": "hybrid",
                 "include_parent": True,
+                "rerank": True,
             }
         }
     )
@@ -51,6 +56,7 @@ class SearchResultItem(BaseModel):
     chunk_type: str = Field(..., description="'text', 'table' o 'image_description'")
     page_number: Optional[int] = None
     score: float = Field(..., description="Puntaje de relevancia unificado (RRF o similitud)")
+    rerank_score: Optional[float] = Field(None, description="Puntaje de relevancia refinado por el Reranker Semántico (0.0 - 1.0)")
     rank: int = Field(..., description="Posición en el orden de relevancia (iniciando en 1)")
     metadata: Dict[str, Any] = Field(default_factory=dict)
 

@@ -73,7 +73,7 @@ async def test_search_endpoint_validation():
 
 @pytest.mark.asyncio
 async def test_search_endpoint_hybrid():
-    """Verifica que el endpoint /api/v1/search responda con la estructura de esquema esperada."""
+    """Verifica que el endpoint /api/v1/search responda con la estructura de esquema esperada y rerank_score."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         payload = {
@@ -81,6 +81,7 @@ async def test_search_endpoint_hybrid():
             "top_k": 3,
             "mode": "hybrid",
             "include_parent": True,
+            "rerank": True,
         }
         resp = await client.post("/api/v1/search", json=payload)
         assert resp.status_code == 200
@@ -89,5 +90,26 @@ async def test_search_endpoint_hybrid():
         assert data["mode"] == "hybrid"
         assert "total_results" in data
         assert "results" in data
+        assert isinstance(data["results"], list)
+        for item in data["results"]:
+            assert "rerank_score" in item
+
+
+@pytest.mark.asyncio
+async def test_search_endpoint_with_rerank_disabled():
+    """Verifica que el endpoint /api/v1/search funcione correctamente con rerank=False."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        payload = {
+            "query": "auditoría de sistemas",
+            "top_k": 2,
+            "mode": "dense",
+            "include_parent": False,
+            "rerank": False,
+        }
+        resp = await client.post("/api/v1/search", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["mode"] == "dense"
         assert isinstance(data["results"], list)
 

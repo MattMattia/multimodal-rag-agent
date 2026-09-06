@@ -13,6 +13,7 @@ class CitationItem(BaseModel):
     page_number: Optional[int] = None
     chunk_type: str = Field(..., description="'text', 'table' o 'image_description'")
     chunk_id: Optional[uuid.UUID] = None
+    rerank_score: Optional[float] = Field(None, description="Puntaje de relevancia del Reranker Semántico")
 
 
 class ToolExecutionRecord(BaseModel):
