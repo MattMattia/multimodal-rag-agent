@@ -34,8 +34,8 @@ Each spec is the finding with the same ID in `CLAUDE_AUDIT_MASTER_PROMPT.md` sec
 | T1 Phase 1 P0 bugs | S1-S6, S17 | delegated `tdd-guide` (user asked for ECC subagents; context backstop) | done (39 passed) | 799621a |
 | T2 Phase 2 security | S7-S11 | delegated `tdd-guide` writer + `security-reviewer` verifier (Risk item 2) | done (69 passed; verifier PASS S7-S11) | 9d022db |
 | T3 Phase 3 async/DB/RAG | S12-S16 | delegated writer + `database-reviewer` and `code-reviewer` (Python) | done (87 passed; both verifiers PASS) | 998ca87 |
-| T4 Phase 4 tests/deps/docs | S18-S19 | delegated writer (refactor-cleaner/doc-updater role) | pending | |
-| T5 Phase 5 verification | S20 | inline `verification-loop` | pending | |
+| T4 Phase 4 tests/deps/docs | S18-S19 | delegated `general-purpose` writer (refactor-cleaner/doc-updater role) | done (87 passed) | a09140f, db3af4e |
+| T5 Phase 5 verification | S20 | inline `verification-loop` | done (Docker: 87 passed, appuser, api healthy) | - |
 
 ## Log
 
@@ -44,3 +44,5 @@ Each spec is the finding with the same ID in `CLAUDE_AUDIT_MASTER_PROMPT.md` sec
 - L3: Baseline 24 passed / 6 failed (no Postgres). Docker later came up; full suite after T1: 39 passed, 0 failed (parent rerun of agent/reranker/telemetry: 26 passed). Advisory: `_execute_fallback_turn` streaming still uses `split(" ")` + `sleep(0.01)` (outside BUG-05 wording). `start_trace` sets the ContextVar without a token; `clear_active_parent()` added. ruff reports 149 pre-existing findings; handled in T4 with `pyproject.toml`.
 - L4: T2 verifier: S7-S11 PASS, no blockers. Parent fixed two advisories (RED→GREEN): SSRF now fails closed on `gaierror` and rejects non-global IPs (CGNAT). Remaining advisories: DNS-rebinding TOCTOU (validate-then-resolve), `/docs` open, browser PDF links 401 when `API_KEY` set, uid 1000 bind mount on Linux. `.env.example` blocked by a user permission rule: new keys `API_KEY`, `ALLOWED_WEBHOOK_HOSTS`, `MAX_UPLOAD_SIZE_MB` handed to the user. Full suite 69 passed.
 - L5: T3 verifiers (database, Python): all PASS, no blockers. EXPLAIN confirms both GIN indexes match the query expressions. Advisories: existing HNSW index keeps default params until dropped/recreated (not done: destructive); dedup can return fewer than `top_k`; orphan PNGs if the pipeline fails after extraction (baseline); history slice could start on an assistant turn only with unpaired messages. Dev DB got the English GIN index from `init_db`.
+- L6: T4 found a Phase 2 regression missed by the security verifier: `API_HEADERS` used 7x but undefined in `frontend/app.py` (NameError on every request); fixed in a09140f, `ruff --select F821` clean. Ruff baseline with new pyproject: 386 findings (mostly UP006/UP045/E501). mypy config untested (not installed). Tests still calling Gemini/Langfuse: 4 agent integration tests and search embedding tests.
+- L7: T5 Docker: rebuilt api+frontend; `py_compile` OK on 12 modules; `whoami` = appuser; api healthy; `docker compose exec api pytest` 87 passed in 99.6s. Residuals: 0 orphan images (94), 0 orphan documents (13); 28 PDFs in `uploads/reports/` not tracked in DB, deletion pending user confirmation. `.env.example` edits pending user (permission rule).
