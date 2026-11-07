@@ -13,6 +13,16 @@ from app.core.telemetry import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_active_parent():
+    """Start every telemetry test with no active parent and restore it afterwards."""
+    from app.core.telemetry import _active_telemetry_parent
+
+    token = _active_telemetry_parent.set(None)
+    yield
+    _active_telemetry_parent.reset(token)
+
+
 def test_dummy_span_and_trace_resilience():
     """Verifica que DummySpan y DummyTrace respondan a toda la interfaz sin lanzar excepciones."""
     trace = DummyTrace(name="test_trace", id="session-123")
@@ -242,4 +252,68 @@ def test_telemetry_service_exception_resilience():
 
     # Flush fallido debe manejarse de forma silenciosa
     service.flush()
+
+
+def test_nested_span_resolves_active_parent_from_contextvar():
+    """span(parent=None) inside an active span must nest under it and restore the var on exit."""
+    from app.core.telemetry import _active_telemetry_parent
+
+    service = TelemetryService()
+    service._enabled = True
+    service._client = MagicMock()
+
+    class FakeParent:
+        def __init__(self, label):
+            self.label = label
+            self.children = []
+
+        def span(self, name, **kwargs):
+            child = FakeParent(name)
+            self.children.append(child)
+            return child
+
+        def end(self, *a, **k):
+            pass
+
+    root = FakeParent("root")
+    token = _active_telemetry_parent.set(root)
+    try:
+        with service.span(parent=None, name="outer") as outer:
+            assert _active_telemetry_parent.get() is outer
+            with service.span(parent=None, name="inner") as inner:
+                assert _active_telemetry_parent.get() is inner
+            assert _active_telemetry_parent.get() is outer
+        assert _active_telemetry_parent.get() is root
+    finally:
+        _active_telemetry_parent.reset(token)
+
+    assert [c.label for c in root.children] == ["outer"]
+    assert [c.label for c in root.children[0].children] == ["inner"]
+    assert _active_telemetry_parent.get() is None
+
+
+def test_span_sets_active_parent_and_works_when_disabled():
+    from app.core.telemetry import _active_telemetry_parent
+
+    service = TelemetryService()
+    service._enabled = False
+    with service.span(parent=None, name="child") as child:
+        assert isinstance(child, DummySpan)
+        assert _active_telemetry_parent.get() is child
+    assert _active_telemetry_parent.get() is None
+
+
+def test_record_generation_falls_back_to_active_parent():
+    from app.core.telemetry import _active_telemetry_parent
+
+    service = TelemetryService()
+    service._enabled = True
+    service._client = MagicMock()
+    parent = MagicMock()
+    token = _active_telemetry_parent.set(parent)
+    try:
+        service.record_generation(parent=None, name="g", model="m", input="i", output="o")
+    finally:
+        _active_telemetry_parent.reset(token)
+    parent.generation.assert_called_once()
 

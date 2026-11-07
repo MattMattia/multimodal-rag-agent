@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+import re
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 import uuid
 
@@ -46,6 +46,11 @@ Reglas esenciales:
    - En tu mensaje de respuesta, explica brevemente qué contiene el reporte generado y confirma que está listo para descargar.
 6. Sé conciso, profesional, analítico y riguroso.
 """
+
+
+def _split_preserving_whitespace(text: str) -> List[str]:
+    """Split text into word-sized chunks without losing any character (spaces, newlines, indentation)."""
+    return re.findall(r"\s*\S+\s*|\s+", text)
 
 
 def _get_tool_declarations() -> List[Any]:
@@ -259,6 +264,7 @@ class AutonomousAgentService:
                 )
             if hasattr(trace, "end"):
                 trace.end()
+            telemetry_service.clear_active_parent()
             telemetry_service.flush()
         except Exception as e:
             logger.debug("Error cerrando traza de telemetría: %s", e)
@@ -462,14 +468,22 @@ class AutonomousAgentService:
                         preferred_model=active_model,
                     )
 
+                    telemetry_service.record_generation(
+                        parent=trace,
+                        name=f"gemini_turn_{turn}",
+                        model=active_model,
+                        input=user_message if turn == 0 else f"react_turn_{turn}",
+                        output=response.text
+                        if getattr(response, "text", None)
+                        else [fc.name for fc in (response.function_calls or [])],
+                        metadata={"turn": turn, "stream": True},
+                    )
+
                     if not response.function_calls:
                         if response.text:
-                            words = response.text.split(" ")
-                            for i, w in enumerate(words):
-                                chunk = w if i == len(words) - 1 else w + " "
+                            for chunk in _split_preserving_whitespace(response.text):
                                 full_response += chunk
                                 yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
-                                await asyncio.sleep(0.01)
                             final_text_needed = False
                         break
 
@@ -482,9 +496,6 @@ class AutonomousAgentService:
                         tool_args = dict(fc.args) if fc.args else {}
                         logger.info("Agente (Stream) invocando tool: %s con args: %s", tool_name, tool_args)
 
-                        tool_result, tool_citations = await self._dispatch_tool_call(
-                            db=db, tool_name=tool_name, tool_args=tool_args
-                        )
                         with telemetry_service.span(
                             parent=trace,
                             name=f"tool:{tool_name}",
@@ -603,6 +614,7 @@ class AutonomousAgentService:
                 )
             if hasattr(trace, "end"):
                 trace.end()
+            telemetry_service.clear_active_parent()
             telemetry_service.flush()
         except Exception as e:
             logger.debug("Error cerrando traza de telemetría en stream: %s", e)
@@ -701,9 +713,6 @@ class AutonomousAgentService:
                 logger.info("Agente solicitó invocar tool: %s con args: %s", tool_name, tool_args)
 
                 # Ejecutar la herramienta correspondiente
-                tool_result, tool_citations = await self._dispatch_tool_call(
-                    db=db, tool_name=tool_name, tool_args=tool_args
-                )
                 # Ejecutar la herramienta correspondiente dentro de un span de telemetría
                 with telemetry_service.span(
                     parent=trace,
@@ -771,6 +780,7 @@ class AutonomousAgentService:
                             page_number=c.get("page_number"),
                             chunk_type=c["chunk_type"],
                             chunk_id=c.get("chunk_id"),
+                            rerank_score=c.get("rerank_score"),
                         )
                     )
                 return result.get("context_text", ""), citations
@@ -832,7 +842,6 @@ class AutonomousAgentService:
 
         rag_context = ""
         if needs_search:
-            search_res = await execute_search_knowledge_base(db=db, query=search_query, top_k=3)
             with telemetry_service.span(
                 parent=trace,
                 name="tool:search_knowledge_base",
@@ -853,6 +862,7 @@ class AutonomousAgentService:
                         page_number=c.get("page_number"),
                         chunk_type=c["chunk_type"],
                         chunk_id=c.get("chunk_id"),
+                        rerank_score=c.get("rerank_score"),
                     )
                 )
 
@@ -891,9 +901,6 @@ class AutonomousAgentService:
                     "Validación de registros completada satisfactoriamente.",
                 ]
 
-            pdf_info = execute_generate_report_pdf(
-                title=pdf_title, summary=pdf_summary, key_points=key_points
-            )
             with telemetry_service.span(
                 parent=trace,
                 name="tool:generate_report_pdf",
@@ -920,7 +927,6 @@ class AutonomousAgentService:
         if needs_webhook:
             event_type = "user_alert"
             payload = {"query": user_message, "alert_triggered": True}
-            webhook_info = await execute_dispatch_webhook(event_type=event_type, payload=payload)
             with telemetry_service.span(
                 parent=trace,
                 name="tool:dispatch_webhook",

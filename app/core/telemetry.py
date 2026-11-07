@@ -1,4 +1,5 @@
 import contextlib
+import contextvars
 import logging
 import os
 import time
@@ -7,6 +8,11 @@ from typing import Any, Dict, Generator, List, Optional
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Active telemetry parent (trace or span) so nested calls with parent=None attach correctly.
+_active_telemetry_parent: contextvars.ContextVar[Optional[Any]] = contextvars.ContextVar(
+    "_active_telemetry_parent", default=None
+)
 
 # Intento de importación de Langfuse SDK
 _LANGFUSE_AVAILABLE = False
@@ -161,6 +167,31 @@ class TelemetryService:
         metadata: Optional[Dict[str, Any]] = None,
         tags: Optional[List[str]] = None,
     ) -> Any:
+        """Crea la traza raíz y la registra como padre activo para spans anidados con parent=None."""
+        trace = self._create_trace(
+            name=name,
+            session_id=session_id,
+            user_id=user_id,
+            input=input,
+            metadata=metadata,
+            tags=tags,
+        )
+        _active_telemetry_parent.set(trace)
+        return trace
+
+    def clear_active_parent(self) -> None:
+        """Libera el padre activo (llamar al cerrar la traza raíz de un turno)."""
+        _active_telemetry_parent.set(None)
+
+    def _create_trace(
+        self,
+        name: str,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        input: Optional[Any] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
+    ) -> Any:
         if not self.is_enabled or not self._client:
             return DummyTrace(name=name, id=session_id or "local")
 
@@ -199,6 +230,8 @@ class TelemetryService:
         """Context manager para instrumentar spans de ejecución registrando automáticamente latencia."""
         start_time = time.time()
         span_obj = None
+        if parent is None:
+            parent = _active_telemetry_parent.get()
 
         if self.is_enabled and not isinstance(parent, (DummyTrace, DummySpan)):
             try:
@@ -239,9 +272,11 @@ class TelemetryService:
         if span_obj is None:
             span_obj = DummySpan(name)
 
+        token = _active_telemetry_parent.set(span_obj)
         try:
             yield span_obj
         finally:
+            _active_telemetry_parent.reset(token)
             elapsed = time.time() - start_time
             if span_obj and hasattr(span_obj, "end"):
                 try:
@@ -260,6 +295,8 @@ class TelemetryService:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """Registra un evento de generación LLM con modelo, consumo de tokens y prompts."""
+        if parent is None:
+            parent = _active_telemetry_parent.get()
         if not self.is_enabled:
             return DummySpan(name)
 

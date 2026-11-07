@@ -74,59 +74,33 @@ class RerankerService:
         """
         if not candidates:
             return []
+
         with telemetry_service.span(
             parent=None,
             name="semantic_reranker",
             span_type="chain",
             input={"query": query, "candidate_count": len(candidates), "top_n": top_n},
         ) as rerank_span:
-            if not candidates:
-                return []
-
-        if len(candidates) <= 1:
-            res = [dict(candidates[0])]
-            res[0]["rerank_score"] = round(float(res[0].get("score", 1.0)), 4)
-            return res
             if len(candidates) <= 1:
                 res = [dict(candidates[0])]
                 res[0]["rerank_score"] = round(float(res[0].get("score", 1.0)), 4)
-                if hasattr(rerank_span, "update"):
-                    rerank_span.update(output={"returned_count": len(res)})
+                rerank_span.update(output={"returned_count": len(res), "mode": "single_candidate"})
                 return res
 
-        # Si el cliente no está disponible, aplicar inmediatamente el fallback determinístico
-        client_ready = self._ensure_client()
-        if not client_ready or not self._client:
-            return self._apply_deterministic_fallback(candidates, top_n)
             # Si el cliente no está disponible, aplicar inmediatamente el fallback determinístico
             client_ready = self._ensure_client()
             if not client_ready or not self._client:
                 result = self._apply_deterministic_fallback(candidates, top_n)
-                if hasattr(rerank_span, "update"):
-                    rerank_span.update(output={"returned_count": len(result), "mode": "fallback"})
+                rerank_span.update(output={"returned_count": len(result), "mode": "fallback"})
                 return result
 
-        try:
-            # Ejecutar con timeout de 8 segundos para evitar bloqueos
-            return await asyncio.wait_for(
-                self._score_with_gemini(query=query, candidates=candidates, top_n=top_n),
-                timeout=8.0,
-            )
-        except Exception as e:
-            logger.warning(
-                "RerankerService: Falló la evaluación semántica con Gemini (%s: %s). Aplicando fallback determinístico RRF.",
-                type(e).__name__,
-                e,
-            )
-            return self._apply_deterministic_fallback(candidates, top_n)
             try:
                 # Ejecutar con timeout de 8 segundos para evitar bloqueos
                 result = await asyncio.wait_for(
                     self._score_with_gemini(query=query, candidates=candidates, top_n=top_n),
                     timeout=8.0,
                 )
-                if hasattr(rerank_span, "update"):
-                    rerank_span.update(output={"returned_count": len(result), "mode": "gemini_scoring"})
+                rerank_span.update(output={"returned_count": len(result), "mode": "gemini_scoring"})
                 return result
             except Exception as e:
                 logger.warning(
@@ -135,8 +109,7 @@ class RerankerService:
                     e,
                 )
                 result = self._apply_deterministic_fallback(candidates, top_n)
-                if hasattr(rerank_span, "update"):
-                    rerank_span.update(output={"returned_count": len(result), "mode": "fallback_error"})
+                rerank_span.update(output={"returned_count": len(result), "mode": "fallback_error"})
                 return result
 
     async def _score_with_gemini(

@@ -1,3 +1,5 @@
+import html
+import json
 import os
 import uuid
 from typing import Any, Dict, List, Optional
@@ -148,13 +150,14 @@ def stream_chat_response(message: str, session_id: str, metadata_container: Dict
                             yield event.get("content", "")
                         elif ev_type == "metadata":
                             metadata_container.update(event)
-                    except Exception:
-                        pass
+                    except json.JSONDecodeError:
+                        continue  # malformed SSE payload: skip it
     except Exception as e:
         metadata_container["error"] = str(e)
         yield f"\n\n⚠️ Error de conexión durante la transmisión en streaming: {str(e)}"
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_file_bytes(relative_url: str) -> Optional[bytes]:
     """Descarga los bytes de un archivo estático servido por la API."""
     try:
@@ -265,7 +268,7 @@ with st.sidebar:
             with st.expander(f"{status_emoji} {doc.get('filename')}"):
                 st.write(f"**Tipo:** {doc.get('file_type')}")
                 st.write(f"**Estado:** `{status}`")
-                chunks_count = len(doc.get("chunks", [])) if doc.get("chunks") else "N/A"
+                chunks_count = doc.get("total_chunks", 0)
                 st.write(f"**Fragmentos (Chunks):** {chunks_count}")
                 st.write(f"**Fecha:** {doc.get('upload_date', '')[:19]}")
                 st.code(f"ID: {doc.get('id')}", language="text")
@@ -314,10 +317,10 @@ for msg in history_messages:
             if citations:
                 with st.expander(f"📚 Fuentes y Citas ({len(citations)})", expanded=False):
                     for c in citations:
-                        doc_name = c.get("document_name", "Documento")
+                        doc_name = html.escape(str(c.get("document_name", "Documento")))
                         page_num = c.get("page_number")
                         page_str = f"Pág. {page_num}" if page_num else "Pág. N/D"
-                        chunk_type = c.get("chunk_type", "text")
+                        chunk_type = html.escape(str(c.get("chunk_type", "text")))
                         st.markdown(
                             f"<div class='citation-box'>📄 <b>{doc_name}</b> ({page_str}) — Tipo: <code>{chunk_type}</code></div>",
                             unsafe_allow_html=True,
@@ -388,10 +391,10 @@ if user_input:
             if new_citations:
                 with st.expander(f"📚 Fuentes y Citas ({len(new_citations)})", expanded=False):
                     for c in new_citations:
-                        doc_name = c.get("document_name", "Documento")
+                        doc_name = html.escape(str(c.get("document_name", "Documento")))
                         page_num = c.get("page_number")
                         page_str = f"Pág. {page_num}" if page_num else "Pág. N/D"
-                        chunk_type = c.get("chunk_type", "text")
+                        chunk_type = html.escape(str(c.get("chunk_type", "text")))
                         st.markdown(
                             f"<div class='citation-box'>📄 <b>{doc_name}</b> ({page_str}) — Tipo: <code>{chunk_type}</code></div>",
                             unsafe_allow_html=True,

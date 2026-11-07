@@ -31,6 +31,40 @@ def test_reranker_single_candidate():
     assert res[0]["rerank_score"] == 0.85
 
 
+async def test_rerank_updates_span_with_output_on_every_return_path():
+    """The span must stay open for the whole body and receive output before exit."""
+    events = []
+
+    class FakeSpan:
+        def update(self, **kwargs):
+            events.append(("update", kwargs))
+
+    class FakeCM:
+        def __enter__(self):
+            events.append(("enter", None))
+            return FakeSpan()
+
+        def __exit__(self, *exc):
+            events.append(("exit", None))
+
+    service = RerankerService()
+    cands = [
+        {"chunk_id": uuid.uuid4(), "content": "a", "document_name": "d", "score": 0.9},
+        {"chunk_id": uuid.uuid4(), "content": "b", "document_name": "d", "score": 0.5},
+    ]
+    with patch("app.services.reranker.telemetry_service.span", side_effect=lambda **kw: FakeCM()), patch.object(
+        service, "_ensure_client", return_value=False
+    ):
+        res = await service.rerank(query="q", candidates=cands, top_n=2)
+        single = await service.rerank(query="q", candidates=cands[:1], top_n=2)
+
+    updates = [e[1] for e in events if e[0] == "update"]
+    assert len(res) == 2 and len(single) == 1
+    assert [u["output"]["returned_count"] for u in updates] == [2, 1]
+    kinds = [e[0] for e in events]
+    assert kinds == ["enter", "update", "exit", "enter", "update", "exit"]
+
+
 @pytest.mark.asyncio
 async def test_reranker_deterministic_fallback_on_exception():
     """Valida que ante fallo de la API o timeout se preserve el ordenamiento RRF original sin lanzar excepciones."""

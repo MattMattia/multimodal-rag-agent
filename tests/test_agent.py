@@ -184,3 +184,133 @@ async def test_chat_session_memory_persistence():
         assert messages[2]["created_at"] <= messages[3]["created_at"]
 
 
+# ==============================================================================
+# Phase 1 audit remediation: single tool dispatch, streaming fidelity, citations
+# ==============================================================================
+import json as _json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from google.genai import types as _genai_types
+
+from app.schemas.agent import CitationItem
+from app.services.agent import AutonomousAgentService
+
+
+@pytest.fixture
+def no_langfuse():
+    """Keep telemetry inert so unit tests never reach the Langfuse server."""
+    from app.core.telemetry import telemetry_service
+
+    with patch.object(telemetry_service, "_enabled", False):
+        yield
+
+
+def _fake_db() -> MagicMock:
+    db = MagicMock()
+    scalars = MagicMock()
+    scalars.all.return_value = []
+    result = MagicMock()
+    result.scalars.return_value = scalars
+    db.execute = AsyncMock(return_value=result)
+    db.commit = AsyncMock()
+    db.add = MagicMock()
+    return db
+
+
+def _tool_call_response() -> SimpleNamespace:
+    content = _genai_types.Content(role="model", parts=[_genai_types.Part.from_text(text="call")])
+    return SimpleNamespace(
+        function_calls=[SimpleNamespace(name="search_knowledge_base", args={"query": "cv"})],
+        candidates=[SimpleNamespace(content=content)],
+        text=None,
+        usage_metadata=None,
+    )
+
+
+def _text_response(text: str) -> SimpleNamespace:
+    return SimpleNamespace(function_calls=None, candidates=[], text=text, usage_metadata=None)
+
+
+def _make_service(responses: list) -> AutonomousAgentService:
+    service = AutonomousAgentService()
+    service._client = object()
+    service._ensure_client = lambda: True  # type: ignore[method-assign]
+    service._call_gemini_with_fallback = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[(r, "fake-model") for r in responses]
+    )
+    service._dispatch_tool_call = AsyncMock(return_value=("tool result", []))  # type: ignore[method-assign]
+    return service
+
+
+async def test_sync_mode_dispatches_each_tool_call_once(no_langfuse):
+    service = _make_service([_tool_call_response(), _text_response("final")])
+    result = await service._execute_gemini_turn(
+        db=_fake_db(), user_message="hola", session_id=uuid.uuid4(), prior_messages=[]
+    )
+    assert service._dispatch_tool_call.await_count == 1
+    assert len(result.executed_tools) == 1
+    assert result.response == "final"
+
+
+async def test_stream_mode_dispatches_each_tool_call_once_and_records_every_turn(no_langfuse):
+    service = _make_service([_tool_call_response(), _text_response("respuesta final")])
+    with patch("app.services.agent.telemetry_service.record_generation") as record_gen:
+        events = [e async for e in service.execute_turn_stream(db=_fake_db(), user_message="hola")]
+    assert service._dispatch_tool_call.await_count == 1
+    assert record_gen.call_count == 2
+    assert events[-1].startswith("data: ") and '"type": "metadata"' in events[-1]
+
+
+async def test_stream_chunks_preserve_multiline_markdown(no_langfuse):
+    text = "# Titulo\n\n- item uno\n- item  dos\n\n```py\nx = 1\n```\n  indented tail \n"
+    service = _make_service([_text_response(text)])
+    events = [e async for e in service.execute_turn_stream(db=_fake_db(), user_message="hola")]
+    payloads = [_json.loads(e[len("data: "):]) for e in events]
+    tokens = [p["content"] for p in payloads if p["type"] == "token"]
+    assert len(tokens) > 1
+    assert "".join(tokens) == text
+
+
+async def test_fallback_turn_executes_each_tool_once(no_langfuse):
+    service = AutonomousAgentService()
+    search = AsyncMock(return_value={"context_text": "ctx", "citations": [], "total_found": 1})
+    pdf = MagicMock(return_value={"filename": "r.pdf", "download_url": "/uploads/reports/r.pdf"})
+    webhook = AsyncMock(return_value={"message": "ok"})
+    with patch("app.services.agent.execute_search_knowledge_base", search), patch(
+        "app.services.agent.execute_generate_report_pdf", pdf
+    ), patch("app.services.agent.execute_dispatch_webhook", webhook):
+        await service._execute_fallback_turn(
+            db=_fake_db(),
+            user_message="informe del cv con alerta webhook en pdf",
+            session_id=uuid.uuid4(),
+        )
+    assert search.await_count == 1
+    assert pdf.call_count == 1
+    assert webhook.await_count == 1
+
+
+async def test_citations_carry_rerank_score(no_langfuse):
+    service = AutonomousAgentService()
+    raw = {
+        "context_text": "ctx",
+        "total_found": 1,
+        "citations": [
+            {"document_name": "a.pdf", "page_number": 1, "chunk_type": "text", "chunk_id": None, "rerank_score": 0.87}
+        ],
+    }
+    with patch("app.services.agent.execute_search_knowledge_base", AsyncMock(return_value=raw)):
+        _, dispatched = await service._dispatch_tool_call(
+            db=_fake_db(), tool_name="search_knowledge_base", tool_args={"query": "x"}
+        )
+        fallback = await service._execute_fallback_turn(
+            db=_fake_db(), user_message="cv", session_id=uuid.uuid4()
+        )
+    assert dispatched[0].rerank_score == 0.87
+    assert fallback.citations[0].rerank_score == 0.87
+    deduped = service._deduplicate_citations(
+        [CitationItem(document_name="a.pdf", chunk_type="text", rerank_score=0.5)] * 2
+    )
+    assert len(deduped) == 1 and deduped[0].rerank_score == 0.5
+
+
