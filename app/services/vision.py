@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from pathlib import Path
 from typing import Optional
@@ -8,17 +7,10 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Intentar usar el SDK moderno oficial google-genai
-_USE_MODERN_SDK = False
 try:
     from google import genai
-    _USE_MODERN_SDK = True
-except ImportError:
-    try:
-        import google.generativeai as legacy_genai
-        _USE_MODERN_SDK = False
-    except ImportError:
-        pass
+except ImportError:  # pragma: no cover - google-genai es dependencia obligatoria
+    genai = None
 
 
 PROMPT_TECHNICAL_IMAGE = """Eres un asistente de IA experto en análisis de documentos y visión por computadora.
@@ -47,7 +39,7 @@ class VisionService:
         self.model_name = settings.GEMINI_VISION_MODEL
         self._initialized = False
         self._client = None
-        self._legacy_model = None
+        self._working_model: Optional[str] = None
 
     def _ensure_client(self):
         """Inicializa o actualiza el cliente de Gemini si la API key se configuró dinámicamente."""
@@ -56,16 +48,9 @@ class VisionService:
         if current_key and current_key != "tu_google_api_key_aqui" and (not self._initialized or self.api_key != current_key):
             self.api_key = current_key
             try:
-                if _USE_MODERN_SDK:
-                    self._client = genai.Client(api_key=self.api_key)
-                    self._initialized = True
-                    logger.info("VisionService configurado con SDK oficial google-genai y modelo %s", self.model_name)
-                else:
-                    import google.generativeai as legacy_genai
-                    legacy_genai.configure(api_key=self.api_key)
-                    self._legacy_model = legacy_genai.GenerativeModel(self.model_name)
-                    self._initialized = True
-                    logger.info("VisionService configurado con legacy genai y modelo %s", self.model_name)
+                self._client = genai.Client(api_key=self.api_key)
+                self._initialized = True
+                logger.info("VisionService configurado con SDK oficial google-genai y modelo %s", self.model_name)
             except Exception as e:
                 logger.error("Error al configurar cliente de Gemini en VisionService: %s", e)
 
@@ -87,7 +72,7 @@ class VisionService:
 
         self._ensure_client()
 
-        if not self._initialized:
+        if not self._initialized or not self._client:
             filename = path.name
             return (
                 f"[Descripción de imagen {filename}: GOOGLE_API_KEY no configurada en .env. "
@@ -97,40 +82,42 @@ class VisionService:
         prompt = PROMPT_INVOICE_RECEIPT if prompt_type == "receipt" else PROMPT_TECHNICAL_IMAGE
 
         try:
-            img = Image.open(path)
+            # Copiar a memoria y cerrar el descriptor de archivo inmediatamente
+            with Image.open(path) as opened_img:
+                img = opened_img.copy()
 
-            if _USE_MODERN_SDK and self._client:
-                # Probar modelo configurado y luego variantes modernas si Google deprecó versiones
-                candidate_models = [self.model_name, "gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest"]
-                last_err = None
-                for m_name in candidate_models:
-                    if not m_name:
+            # Probar el último modelo que funcionó, el configurado y variantes modernas si Google deprecó versiones
+            candidate_models = [
+                self._working_model,
+                self.model_name,
+                "gemini-3.6-flash",
+                "gemini-3.5-flash",
+                "gemini-flash-latest",
+            ]
+            last_err = None
+            tried = set()
+            for m_name in candidate_models:
+                if not m_name or m_name in tried:
+                    continue
+                tried.add(m_name)
+                try:
+                    response = await self._client.aio.models.generate_content(
+                        model=m_name,
+                        contents=[img, prompt],
+                    )
+                    if response and response.text:
+                        self._working_model = m_name
+                        return response.text.strip()
+                except Exception as err:
+                    last_err = err
+                    err_str = str(err)
+                    if "404" in err_str or "NOT_FOUND" in err_str or "429" in err_str:
+                        logger.warning("Modelo %s no disponible en VisionService (%s). Probando siguiente...", m_name, err)
                         continue
-                    try:
-                        response = await self._client.aio.models.generate_content(
-                            model=m_name,
-                            contents=[img, prompt],
-                        )
-                        if response and response.text:
-                            return response.text.strip()
-                    except Exception as err:
-                        last_err = err
-                        err_str = str(err)
-                        if "404" in err_str or "NOT_FOUND" in err_str or "429" in err_str:
-                            logger.warning("Modelo %s no disponible en VisionService (%s). Probando siguiente...", m_name, err)
-                            continue
-                        raise err
-                if last_err:
-                    raise last_err
-                return "Sin texto generado."
-            else:
-                loop = asyncio.get_event_loop()
-                def _call_legacy():
-                    res = self._legacy_model.generate_content([prompt, img])
-                    return res.text if res and res.text else "Sin texto generado."
-
-                description = await loop.run_in_executor(None, _call_legacy)
-                return description.strip()
+                    raise err
+            if last_err:
+                raise last_err
+            return "Sin texto generado."
 
         except Exception as e:
             logger.error("Error al generar descripción con Gemini para %s: %s", image_path, e)

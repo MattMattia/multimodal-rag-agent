@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.telemetry import telemetry_service
@@ -97,6 +97,9 @@ class HybridSearchService:
                 fused_candidates = sparse_items
             else:  # hybrid
                 fused_candidates = self._apply_rrf(dense_items, sparse_items)
+
+            # Un único resultado por bloque padre (el de mayor puntaje) para maximizar diversidad
+            fused_candidates = self._dedupe_by_parent_block(fused_candidates)
 
             # Si se solicita reranking semántico (por defecto True):
             # Tomar una ventana más amplia de candidatos (top_k * 3) y pasarlos por RerankerService
@@ -199,10 +202,14 @@ class HybridSearchService:
     ) -> List[Dict[str, Any]]:
         """Búsqueda léxica esparsa con soporte bilingüe (español e inglés) y fallback por tokens."""
         # Configuración de diccionarios en español e inglés
-        ts_query_es = func.plainto_tsquery("spanish", query_text)
-        ts_query_en = func.plainto_tsquery("english", query_text)
-        ts_vector_es = func.to_tsvector("spanish", DocumentChunk.content)
-        ts_vector_en = func.to_tsvector("english", DocumentChunk.content)
+        # La configuración se emite como literal SQL (no parámetro) para que la expresión
+        # to_tsvector('<cfg>', content) coincida exactamente con los índices GIN.
+        cfg_es = literal_column("'spanish'")
+        cfg_en = literal_column("'english'")
+        ts_query_es = func.websearch_to_tsquery(cfg_es, query_text)
+        ts_query_en = func.websearch_to_tsquery(cfg_en, query_text)
+        ts_vector_es = func.to_tsvector(cfg_es, DocumentChunk.content)
+        ts_vector_en = func.to_tsvector(cfg_en, DocumentChunk.content)
 
         rank_expr = func.greatest(
             func.ts_rank_cd(ts_vector_es, ts_query_es),
@@ -303,6 +310,19 @@ class HybridSearchService:
             fused_items.append(merged_item)
 
         return fused_items
+
+    @staticmethod
+    def _dedupe_by_parent_block(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Conserva el primer (mejor puntuado) candidato de cada bloque efectivo (parent_id o chunk_id)."""
+        seen: set = set()
+        unique: List[Dict[str, Any]] = []
+        for item in items:
+            block_id = item.get("parent_id") or item["chunk_id"]
+            if block_id in seen:
+                continue
+            seen.add(block_id)
+            unique.append(item)
+        return unique
 
     async def attach_parent_context(
         self, db: AsyncSession, ranked_items: List[Dict[str, Any]]

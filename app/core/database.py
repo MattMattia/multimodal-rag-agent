@@ -14,6 +14,9 @@ engine = create_async_engine(
     echo=settings.DEBUG,
     future=True,
     pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=1800,
 )
 
 # Fábrica de sesiones asíncronas
@@ -39,8 +42,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
 
 
 async def init_db() -> None:
@@ -62,7 +63,8 @@ async def init_db() -> None:
             await conn.execute(
                 text(
                     "CREATE INDEX IF NOT EXISTS document_chunks_embedding_hnsw_idx "
-                    "ON document_chunks USING hnsw (embedding vector_cosine_ops);"
+                    "ON document_chunks USING hnsw (embedding vector_cosine_ops) "
+                    "WITH (m = 16, ef_construction = 64);"
                 )
             )
             # Índice GIN para búsqueda léxica full-text search en español
@@ -70,6 +72,13 @@ async def init_db() -> None:
                 text(
                     "CREATE INDEX IF NOT EXISTS document_chunks_content_tsv_idx "
                     "ON document_chunks USING gin (to_tsvector('spanish', content));"
+                )
+            )
+            # Índice GIN para búsqueda léxica full-text search en inglés
+            await conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS document_chunks_content_tsv_en_idx "
+                    "ON document_chunks USING gin (to_tsvector('english', content));"
                 )
             )
         logger.info("Base de datos, tablas e índices vectoriales inicializados exitosamente.")

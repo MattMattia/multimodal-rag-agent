@@ -19,6 +19,9 @@ from app.tools.webhook_tool import execute_dispatch_webhook
 
 logger = logging.getLogger(__name__)
 
+# Máximo de mensajes previos enviados a Gemini (la BD conserva el historial completo)
+MAX_HISTORY_MESSAGES = 20
+
 # Intentar importar el SDK moderno de Google GenAI
 _USE_MODERN_GENAI = False
 try:
@@ -449,7 +452,7 @@ class AutonomousAgentService:
                 )
 
                 contents: List[types.Content] = []
-                for msg in prior_messages:
+                for msg in prior_messages[-MAX_HISTORY_MESSAGES:]:
                     if msg.role == "user":
                         contents.append(types.Content(role="user", parts=[types.Part.from_text(text=msg.content)]))
                     elif msg.role == "assistant":
@@ -643,7 +646,7 @@ class AutonomousAgentService:
 
         # 2. Historial de conversación multi-turno para el modelo
         contents: List[types.Content] = []
-        for msg in prior_messages:
+        for msg in prior_messages[-MAX_HISTORY_MESSAGES:]:
             if msg.role == "user":
                 contents.append(
                     types.Content(
@@ -789,7 +792,9 @@ class AutonomousAgentService:
                 title = tool_args.get("title", "Reporte Ejecutivo")
                 summary = tool_args.get("summary", "Sin resumen.")
                 key_points = tool_args.get("key_points", [])
-                result = execute_generate_report_pdf(title=title, summary=summary, key_points=key_points)
+                result = await asyncio.to_thread(
+                    execute_generate_report_pdf, title=title, summary=summary, key_points=key_points
+                )
                 return result, []
 
             elif tool_name == "dispatch_webhook":
@@ -907,8 +912,11 @@ class AutonomousAgentService:
                 span_type="tool",
                 input={"title": pdf_title, "summary": pdf_summary},
             ) as tool_span:
-                pdf_info = execute_generate_report_pdf(
-                    title=pdf_title, summary=pdf_summary, key_points=key_points
+                pdf_info = await asyncio.to_thread(
+                    execute_generate_report_pdf,
+                    title=pdf_title,
+                    summary=pdf_summary,
+                    key_points=key_points,
                 )
                 if hasattr(tool_span, "update"):
                     tool_span.update(output=pdf_info)
