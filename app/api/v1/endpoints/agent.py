@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.security import error_detail
 from app.models.chat import ChatMessage
 from app.schemas.agent import (
     AgentChatRequest,
@@ -80,7 +81,7 @@ async def chat_with_agent(
         logger.exception("Error en la ejecución del Agente IA: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error interno durante la ejecución del agente: {str(e)}",
+            detail=error_detail("Error interno durante la ejecución del agente", e),
         )
 
 
@@ -112,7 +113,7 @@ async def get_session_history(
         logger.exception("Error al consultar historial para session_id %s: %s", session_id, e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error interno al recuperar historial: {str(e)}",
+            detail=error_detail("Error interno al recuperar historial", e),
         )
 
 

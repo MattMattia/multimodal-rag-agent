@@ -34,8 +34,13 @@ class Settings(BaseSettings):
     LANGFUSE_HOST: str = "http://langfuse:3000"
     LANGFUSE_ENABLED: bool = False
 
+    # Seguridad
+    API_KEY: str = ""  # si no está vacío, /api/v1 exige el header X-API-Key
+    ALLOWED_WEBHOOK_HOSTS: List[str] = []  # hosts a los que se permite webhooks http (no https)
+    MAX_UPLOAD_SIZE_MB: float = 25
+
     # CORS
-    ALLOWED_ORIGINS: List[str] = ["*"]
+    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000", "http://localhost:8501"]
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
@@ -50,6 +55,18 @@ class Settings(BaseSettings):
         elif isinstance(v, list):
             return v
         return ["*"]
+
+    @field_validator("ALLOWED_WEBHOOK_HOSTS", mode="before")
+    @classmethod
+    def assemble_webhook_hosts(cls, v: Union[str, List[str]]) -> List[str]:
+        if isinstance(v, str):
+            if v.startswith("[") and v.endswith("]"):
+                try:
+                    return json.loads(v)
+                except Exception:
+                    pass
+            return [i.strip().lower() for i in v.split(",") if i.strip()]
+        return v
 
     @property
     def sync_database_url(self) -> str:

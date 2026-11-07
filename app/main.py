@@ -2,13 +2,14 @@ from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.database import init_db
+from app.core.security import require_api_key
 
 # Configuración básica de logging
 logging.basicConfig(
@@ -53,9 +54,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Montar directorio estático de uploads para servir/previsualizar archivos e imágenes
-Path("uploads").mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# Los uploads ya no se exponen como estáticos públicos: solo los reportes PDF se sirven,
+# mediante una ruta autenticada (X-API-Key) con contención de ruta.
+REPORTS_DIR = Path("uploads/reports")
+
+
+@app.get("/uploads/reports/{filename}", tags=["Reports"], dependencies=[Depends(require_api_key)])
+async def download_report(filename: str):
+    """Descarga un reporte PDF generado por el agente (solo archivos dentro del directorio de reportes)."""
+    base = REPORTS_DIR.resolve()
+    candidate = (base / filename).resolve()
+    if not candidate.is_relative_to(base) or candidate.suffix.lower() != ".pdf" or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Reporte no encontrado.")
+    return FileResponse(candidate, media_type="application/pdf", filename=candidate.name)
 
 
 @app.get("/health", tags=["General"])

@@ -25,6 +25,8 @@ services:
       dockerfile: Dockerfile
     container_name: rag_api
     restart: always
+    # Desarrollo: recarga automática (la imagen base ya no usa --reload)
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     depends_on:
       db:
         condition: service_healthy
@@ -62,6 +64,7 @@ services:
     environment:
       API_URL: http://api:8000
       PUBLIC_API_URL: http://localhost:8000
+      API_KEY: ${API_KEY:-}
     ports:
       - "8501:8501"
     volumes:

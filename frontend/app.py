@@ -65,7 +65,7 @@ st.markdown(
 def check_api_health() -> Dict[str, Any]:
     """Consulta el estado del servicio backend FastAPI."""
     try:
-        resp = httpx.get(f"{API_URL}/health", timeout=3.0)
+        resp = httpx.get(f"{API_URL}/health", headers=API_HEADERS, timeout=3.0)
         if resp.status_code == 200:
             return resp.json()
     except Exception:
@@ -76,7 +76,7 @@ def check_api_health() -> Dict[str, Any]:
 def fetch_documents() -> List[Dict[str, Any]]:
     """Obtiene la lista de documentos registrados en el sistema."""
     try:
-        resp = httpx.get(f"{API_URL}/api/v1/documents", timeout=5.0)
+        resp = httpx.get(f"{API_URL}/api/v1/documents", headers=API_HEADERS, timeout=5.0)
         if resp.status_code == 200:
             return resp.json()
     except Exception:
@@ -88,7 +88,7 @@ def upload_document_api(file_bytes: bytes, filename: str) -> Dict[str, Any]:
     """Sube un documento a la API para su procesamiento multimodal."""
     try:
         files = {"file": (filename, file_bytes)}
-        resp = httpx.post(f"{API_URL}/api/v1/documents/upload", files=files, timeout=60.0)
+        resp = httpx.post(f"{API_URL}/api/v1/documents/upload", files=files, headers=API_HEADERS, timeout=60.0)
         if resp.status_code in (200, 201, 202):
             return {"success": True, "data": resp.json() if resp.text else {}}
         else:
@@ -100,7 +100,7 @@ def upload_document_api(file_bytes: bytes, filename: str) -> Dict[str, Any]:
 def fetch_session_history(session_id: str) -> List[Dict[str, Any]]:
     """Recupera el historial de mensajes de una sesión desde PostgreSQL."""
     try:
-        resp = httpx.get(f"{API_URL}/api/v1/agent/sessions/{session_id}/history", timeout=5.0)
+        resp = httpx.get(f"{API_URL}/api/v1/agent/sessions/{session_id}/history", headers=API_HEADERS, timeout=5.0)
         if resp.status_code == 200:
             return resp.json().get("messages", [])
     except Exception:
@@ -112,7 +112,7 @@ def send_chat_message(message: str, session_id: str) -> Dict[str, Any]:
     """Envía un mensaje al Agente IA Autónomo para razonamiento y ejecución."""
     try:
         payload = {"message": message, "session_id": session_id}
-        resp = httpx.post(f"{API_URL}/api/v1/agent/chat", json=payload, timeout=60.0)
+        resp = httpx.post(f"{API_URL}/api/v1/agent/chat", json=payload, headers=API_HEADERS, timeout=60.0)
         if resp.status_code == 200:
             return {"success": True, "data": resp.json()}
         else:
@@ -129,6 +129,7 @@ def stream_chat_response(message: str, session_id: str, metadata_container: Dict
             "POST",
             f"{API_URL}/api/v1/agent/chat/stream",
             json=payload,
+            headers=API_HEADERS,
             timeout=120.0,
         ) as response:
             if response.status_code != 200:
@@ -162,7 +163,7 @@ def fetch_file_bytes(relative_url: str) -> Optional[bytes]:
     """Descarga los bytes de un archivo estático servido por la API."""
     try:
         clean_url = relative_url.lstrip("/")
-        resp = httpx.get(f"{API_URL}/{clean_url}", timeout=15.0)
+        resp = httpx.get(f"{API_URL}/{clean_url}", headers=API_HEADERS, timeout=15.0)
         if resp.status_code == 200:
             return resp.content
     except Exception:

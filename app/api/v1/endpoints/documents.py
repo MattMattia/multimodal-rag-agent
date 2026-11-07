@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-import shutil
+import re
 from typing import List, Optional
 import uuid
 
@@ -9,7 +9,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.security import error_detail
 from app.models.document import Document, DocumentChunk, DocumentImage
 from app.schemas.document import (
     DocumentChunkResponse,
@@ -32,8 +34,28 @@ ALLOWED_MIME_TYPES = {
 }
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 
+MAGIC_SIGNATURES = {
+    ".pdf": (b"%PDF-",),
+    ".png": (b"\x89PNG\r\n\x1a\n",),
+    ".jpg": (b"\xff\xd8\xff",),
+    ".jpeg": (b"\xff\xd8\xff",),
+}
+UPLOAD_CHUNK_SIZE = 65536
+
 UPLOAD_DOCS_DIR = Path("uploads/documents")
 UPLOAD_DOCS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _matches_magic(file_ext: str, head: bytes) -> bool:
+    return any(head.startswith(sig) for sig in MAGIC_SIGNATURES.get(file_ext, ()))
+
+
+def _remove_file_quietly(path: Path) -> None:
+    """Borra un archivo; ignora si no existe y registra cualquier otro fallo."""
+    try:
+        path.unlink(missing_ok=True)
+    except Exception as e:
+        logger.warning("No se pudo borrar el archivo %s: %s", path, e)
 
 
 @router.post(
@@ -51,12 +73,12 @@ async def upload_document(
 
     y encola el pipeline de extracción multimodal (texto, tablas Markdown, diagramas con Gemini y chunks).
     """
-    filename = file.filename or "uploaded_file"
+    filename = re.sub(r"[^a-zA-Z0-9._-]", "_", Path(file.filename or "uploaded_file").name)[:120]
     file_ext = Path(filename).suffix.lower()
     content_type = file.content_type or ""
 
     # Validar extensión y tipo de contenido
-    if file_ext not in ALLOWED_EXTENSIONS and content_type not in ALLOWED_MIME_TYPES:
+    if file_ext not in ALLOWED_EXTENSIONS or content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
@@ -68,20 +90,46 @@ async def upload_document(
     # Identificar tipo de archivo
     file_type = ALLOWED_MIME_TYPES.get(content_type, file_ext.replace(".", ""))
 
-    # Generar ruta segura con UUID
+    # Generar ruta segura con UUID y verificar contención en el directorio de documentos
     doc_id = uuid.uuid4()
     unique_filename = f"{doc_id}_{filename}"
     destination_path = UPLOAD_DOCS_DIR / unique_filename
+    if not destination_path.resolve().is_relative_to(UPLOAD_DOCS_DIR.resolve()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nombre de archivo inválido.")
 
-    # Guardar en disco de forma segura
+    max_bytes = int(settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024)
+    total_bytes = 0
+    head = b""
+
+    # Guardar en disco por bloques, validando firma y tamaño
     try:
         with destination_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            while chunk := await file.read(UPLOAD_CHUNK_SIZE):
+                if not head:
+                    head = chunk[:16]
+                    if not _matches_magic(file_ext, head):
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"El contenido de '{filename}' no coincide con su extensión.",
+                        )
+                total_bytes += len(chunk)
+                if total_bytes > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"El archivo supera el límite de {settings.MAX_UPLOAD_SIZE_MB:g} MB.",
+                    )
+                buffer.write(chunk)
+        if not head:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El archivo está vacío.")
+    except HTTPException:
+        _remove_file_quietly(destination_path)
+        raise
     except Exception as e:
-        logger.error("Error al guardar archivo en disco: %s", e)
+        _remove_file_quietly(destination_path)
+        logger.exception("Error al guardar archivo en disco: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"No se pudo guardar el archivo en el servidor: {str(e)}",
+            detail=error_detail("No se pudo guardar el archivo en el servidor", e),
         )
     finally:
         await file.close()
@@ -267,7 +315,9 @@ async def delete_document(
     db: AsyncSession = Depends(get_db),
 ):
     """Elimina el registro de la base de datos (con chunks e imágenes en cascada) y el archivo en disco."""
-    result = await db.execute(select(Document).where(Document.id == document_id))
+    result = await db.execute(
+        select(Document).options(selectinload(Document.images)).where(Document.id == document_id)
+    )
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(
@@ -275,13 +325,10 @@ async def delete_document(
             detail=f"Documento con ID {document_id} no encontrado.",
         )
 
-    # Eliminar archivo físico de disco si existe
-    file_path = Path(doc.file_path)
-    if file_path.exists():
-        try:
-            file_path.unlink()
-        except Exception as e:
-            logger.warning("No se pudo borrar el archivo físico %s: %s", file_path, e)
+    # Eliminar archivo físico y las imágenes extraídas del disco
+    _remove_file_quietly(Path(doc.file_path))
+    for image in doc.images:
+        _remove_file_quietly(Path(image.image_path))
 
     await db.delete(doc)
     await db.commit()

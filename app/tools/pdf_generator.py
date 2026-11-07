@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional
 import uuid
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -104,21 +105,21 @@ def execute_generate_report_pdf(
     elements = []
 
     # 1. Cabecera y Título
-    elements.append(Paragraph(title, title_style))
+    elements.append(Paragraph(escape(title), title_style))
     current_time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     elements.append(Paragraph(f"Generado automáticamente por Agente IA Autónomo | Fecha: {current_time_str}", date_style))
     elements.append(Spacer(1, 10))
 
     # 2. Resumen Ejecutivo
     elements.append(Paragraph("Resumen Ejecutivo", heading_style))
-    elements.append(Paragraph(summary.replace("\n", "<br/>"), body_style))
+    elements.append(Paragraph(escape(summary).replace("\n", "<br/>"), body_style))
     elements.append(Spacer(1, 10))
 
     # 3. Puntos Clave
     if key_points:
         elements.append(Paragraph("Conclusiones y Puntos Clave", heading_style))
         for point in key_points:
-            elements.append(Paragraph(f"• {point}", bullet_style))
+            elements.append(Paragraph(f"• {escape(point)}", bullet_style))
         elements.append(Spacer(1, 10))
 
     # 4. Secciones Adicionales
@@ -126,8 +127,8 @@ def execute_generate_report_pdf(
         for sec in sections:
             sec_heading = sec.get("heading", "Sección")
             sec_content = sec.get("content", "")
-            elements.append(Paragraph(sec_heading, heading_style))
-            elements.append(Paragraph(sec_content.replace("\n", "<br/>"), body_style))
+            elements.append(Paragraph(escape(sec_heading), heading_style))
+            elements.append(Paragraph(escape(sec_content).replace("\n", "<br/>"), body_style))
             elements.append(Spacer(1, 10))
 
     # 5. Pie de página decorativo

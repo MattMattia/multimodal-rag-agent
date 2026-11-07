@@ -18,12 +18,23 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# Usuario no-root que ejecuta la aplicación
+RUN useradd --create-home --uid 1000 appuser
+
 # Copiar el código de la aplicación
-COPY . .
+COPY --chown=appuser:appuser . .
+RUN mkdir -p /app/uploads/documents /app/uploads/images /app/uploads/reports && \
+    chown -R appuser:appuser /app /app/uploads
+
+USER appuser
 
 # Exponer el puerto de FastAPI
 EXPOSE 8000
 
-# Comando para iniciar el servidor
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Healthcheck con la librería estándar de Python (no depende de curl)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=4).status == 200 else 1)"
+
+# Comando para iniciar el servidor (sin --reload; el modo desarrollo lo añade docker-compose)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 

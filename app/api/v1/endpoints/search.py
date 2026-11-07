@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.security import error_detail
 from app.schemas.search import SearchRequest, SearchResponse
 from app.services.rag_search import hybrid_search_service
 
@@ -38,5 +39,5 @@ async def search_knowledge_base(
         logger.exception("Error al ejecutar búsqueda híbrida: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error interno durante la búsqueda: {str(e)}",
+            detail=error_detail("Error interno durante la búsqueda", e),
         )

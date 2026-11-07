@@ -11,8 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Usuario no-root que ejecuta la aplicación
+RUN useradd --create-home --uid 1000 appuser
+
 # Copiar el código de la aplicación
-COPY . .
+COPY --chown=appuser:appuser . .
+RUN chown -R appuser:appuser /app
+
+USER appuser
 
 # Exponer el puerto por defecto de Streamlit
 EXPOSE 8501

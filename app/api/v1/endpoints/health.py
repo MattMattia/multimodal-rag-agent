@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.schemas.health import HealthResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -22,7 +26,8 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         else:
             db_status = "connected (pgvector not found)"
     except Exception as e:
-        db_status = f"unreachable: {str(e)}"
+        logger.exception("Health check: base de datos inalcanzable: %s", e)
+        db_status = f"unreachable: {e}" if settings.DEBUG else "unreachable"
 
     overall_status = "ok" if "connected" in db_status else "degraded"
 

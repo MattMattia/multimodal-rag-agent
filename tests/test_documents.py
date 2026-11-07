@@ -66,3 +66,94 @@ async def test_vision_placeholder_without_key():
     result = await service.describe_image("non_existent_file.png")
     assert "no encontrado" in result.lower()
 
+
+
+# ---------------------------------------------------------------------------
+# SEC-02: upload hardening (no DB, no Gemini, files confined to tmp_path)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def upload_env(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.api.v1.endpoints import documents as documents_module
+    from app.core.config import settings
+    from app.core.database import get_db
+
+    monkeypatch.setattr(settings, "API_KEY", "")
+    monkeypatch.setattr(documents_module, "UPLOAD_DOCS_DIR", tmp_path)
+    pipeline = AsyncMock()
+    monkeypatch.setattr(documents_module.ingestion_service, "process_document_pipeline", pipeline)
+
+    session = MagicMock()
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+
+    async def _override():
+        yield session
+
+    app.dependency_overrides[get_db] = _override
+    yield tmp_path, session
+    app.dependency_overrides.pop(get_db, None)
+
+
+async def _upload(name, body, content_type):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.post("/api/v1/documents/upload", files={"file": (name, body, content_type)})
+
+
+@pytest.mark.asyncio
+async def test_upload_sanitizes_traversal_filename(upload_env):
+    tmp_path, session = upload_env
+    resp = await _upload("../../evil.pdf", b"%PDF-1.4 hello", "application/pdf")
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["filename"] == "evil.pdf"
+    assert body["file_type"] == "pdf"
+    assert body["status"] == "pending"
+    saved = list(tmp_path.iterdir())
+    assert len(saved) == 1
+    assert saved[0].name.endswith("_evil.pdf")
+    assert saved[0].resolve().is_relative_to(tmp_path.resolve())
+    assert not (tmp_path.parent / "evil.pdf").exists()
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_html_with_pdf_content_type(upload_env):
+    tmp_path, session = upload_env
+    resp = await _upload("page.html", b"<html></html>", "application/pdf")
+    assert resp.status_code == 400
+    assert "Formato no soportado" in resp.json()["detail"]
+    assert list(tmp_path.iterdir()) == []
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_pdf_without_pdf_magic_bytes(upload_env):
+    tmp_path, session = upload_env
+    resp = await _upload("fake.pdf", b"<html>not a pdf</html>", "application/pdf")
+    assert resp.status_code == 400
+    assert list(tmp_path.iterdir()) == []
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_upload_accepts_png_with_magic_bytes(upload_env):
+    tmp_path, _ = upload_env
+    resp = await _upload("pic.png", b"\x89PNG\r\n\x1a\n" + b"0" * 20, "image/png")
+    assert resp.status_code == 202
+    assert len(list(tmp_path.iterdir())) == 1
+
+
+@pytest.mark.asyncio
+async def test_upload_over_limit_returns_413_and_removes_file(upload_env, monkeypatch):
+    from app.core.config import settings
+
+    tmp_path, session = upload_env
+    monkeypatch.setattr(settings, "MAX_UPLOAD_SIZE_MB", 0.0001)  # ~104 bytes
+    resp = await _upload("big.pdf", b"%PDF-" + b"A" * 70000, "application/pdf")
+    assert resp.status_code == 413
+    assert list(tmp_path.iterdir()) == []
+    session.commit.assert_not_awaited()
