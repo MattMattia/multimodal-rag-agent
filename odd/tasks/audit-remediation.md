@@ -31,9 +31,9 @@ Each spec is the finding with the same ID in `CLAUDE_AUDIT_MASTER_PROMPT.md` sec
 
 | ID | Specs | Route | Status | Commit |
 |----|-------|-------|--------|--------|
-| T1 Phase 1 P0 bugs | S1-S6, S17 | delegated `tdd-guide` (user asked for ECC subagents; context backstop) | pending | |
-| T2 Phase 2 security | S7-S11 | delegated `tdd-guide` writer + `security-reviewer` verifier (Risk item 2) | pending | |
-| T3 Phase 3 async/DB/RAG | S12-S16 | delegated writer + `database-reviewer` and `code-reviewer` (Python) | pending | |
+| T1 Phase 1 P0 bugs | S1-S6, S17 | delegated `tdd-guide` (user asked for ECC subagents; context backstop) | done (39 passed) | 799621a |
+| T2 Phase 2 security | S7-S11 | delegated `tdd-guide` writer + `security-reviewer` verifier (Risk item 2) | done (69 passed; verifier PASS S7-S11) | 9d022db |
+| T3 Phase 3 async/DB/RAG | S12-S16 | delegated writer + `database-reviewer` and `code-reviewer` (Python) | done (87 passed; both verifiers PASS) | 998ca87 |
 | T4 Phase 4 tests/deps/docs | S18-S19 | delegated writer (refactor-cleaner/doc-updater role) | pending | |
 | T5 Phase 5 verification | S20 | inline `verification-loop` | pending | |
 
@@ -41,3 +41,6 @@ Each spec is the finding with the same ID in `CLAUDE_AUDIT_MASTER_PROMPT.md` sec
 
 - L1 (2026-11-07, user): "Lee @CLAUDE_AUDIT_MASTER_PROMPT.md y ejecuta el plan completo de 5 fases utilizando los subagentes y flujos de ECC (/plan, /tdd, security-reviewer, python-reviewer, database-reviewer, refactor-cleaner y /verify o /verify-ecc)."
 - L2: Spot-checked BUG-01 (duplicate `_dispatch_tool_call` at agent.py:485), BUG-02 (reranker early span close) and BUG-03 (no `import json`): confirmed. Agent types `python-reviewer`, `refactor-cleaner`, `doc-updater`, `planner` are not installed; substitutes: `code-reviewer`, `general-purpose`.
+- L3: Baseline 24 passed / 6 failed (no Postgres). Docker later came up; full suite after T1: 39 passed, 0 failed (parent rerun of agent/reranker/telemetry: 26 passed). Advisory: `_execute_fallback_turn` streaming still uses `split(" ")` + `sleep(0.01)` (outside BUG-05 wording). `start_trace` sets the ContextVar without a token; `clear_active_parent()` added. ruff reports 149 pre-existing findings; handled in T4 with `pyproject.toml`.
+- L4: T2 verifier: S7-S11 PASS, no blockers. Parent fixed two advisories (RED→GREEN): SSRF now fails closed on `gaierror` and rejects non-global IPs (CGNAT). Remaining advisories: DNS-rebinding TOCTOU (validate-then-resolve), `/docs` open, browser PDF links 401 when `API_KEY` set, uid 1000 bind mount on Linux. `.env.example` blocked by a user permission rule: new keys `API_KEY`, `ALLOWED_WEBHOOK_HOSTS`, `MAX_UPLOAD_SIZE_MB` handed to the user. Full suite 69 passed.
+- L5: T3 verifiers (database, Python): all PASS, no blockers. EXPLAIN confirms both GIN indexes match the query expressions. Advisories: existing HNSW index keeps default params until dropped/recreated (not done: destructive); dedup can return fewer than `top_k`; orphan PNGs if the pipeline fails after extraction (baseline); history slice could start on an assistant turn only with unpaired messages. Dev DB got the English GIN index from `init_db`.

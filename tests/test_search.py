@@ -1,10 +1,20 @@
 import uuid
+from unittest.mock import patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.telemetry import telemetry_service
 from app.main import app
 from app.services.embedding import embedding_service
 from app.services.rag_search import hybrid_search_service
+
+
+@pytest.fixture(autouse=True)
+def no_langfuse():
+    """Keep telemetry inert so search tests never reach the Langfuse server."""
+    with patch.object(telemetry_service, "_enabled", False):
+        yield
 
 
 @pytest.mark.asyncio

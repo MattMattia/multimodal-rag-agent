@@ -1,20 +1,28 @@
-import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
-from app.services.reranker import RerankerService, reranker_service
+from app.services.reranker import RerankerService
+from app.core.telemetry import telemetry_service
 
 
-def test_reranker_empty_list():
+@pytest.fixture(autouse=True)
+def no_langfuse():
+    """Keep telemetry inert so reranker unit tests never reach the Langfuse server."""
+    with patch.object(telemetry_service, "_enabled", False):
+        yield
+
+
+@pytest.mark.asyncio
+async def test_reranker_empty_list():
     """Valida que una lista vacía de candidatos retorne lista vacía inmediatamente."""
     service = RerankerService()
-    loop = asyncio.new_event_loop()
-    res = loop.run_until_complete(service.rerank(query="consulta", candidates=[]))
+    res = await service.rerank(query="consulta", candidates=[])
     assert res == []
 
 
-def test_reranker_single_candidate():
+@pytest.mark.asyncio
+async def test_reranker_single_candidate():
     """Valida que un único candidato preserve sus datos y reciba un rerank_score."""
     service = RerankerService()
     candidate = {
@@ -23,14 +31,14 @@ def test_reranker_single_candidate():
         "document_name": "cv.pdf",
         "score": 0.85,
     }
-    loop = asyncio.new_event_loop()
-    res = loop.run_until_complete(service.rerank(query="Python", candidates=[candidate], top_n=2))
+    res = await service.rerank(query="Python", candidates=[candidate], top_n=2)
     assert len(res) == 1
     assert res[0]["content"] == candidate["content"]
     assert "rerank_score" in res[0]
     assert res[0]["rerank_score"] == 0.85
 
 
+@pytest.mark.asyncio
 async def test_rerank_updates_span_with_output_on_every_return_path():
     """The span must stay open for the whole body and receive output before exit."""
     events = []

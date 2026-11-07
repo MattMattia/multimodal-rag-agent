@@ -1,6 +1,4 @@
-import os
-import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import uuid
 
 import pytest
@@ -9,7 +7,6 @@ from app.core.telemetry import (
     DummySpan,
     DummyTrace,
     TelemetryService,
-    telemetry_service,
 )
 
 

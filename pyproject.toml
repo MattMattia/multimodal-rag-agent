@@ -1,0 +1,42 @@
+# Tooling configuration only. Runtime dependencies live in requirements.txt
+# and pytest configuration lives in pytest.ini.
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [".venv", "uploads", "odd"]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "W",  # pycodestyle warnings
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "UP", # pyupgrade
+    "S",  # flake8-bandit
+]
+ignore = [
+    "B008", # FastAPI dependencies are declared as call defaults (Depends, File, Query)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101", # assert is the pytest idiom
+    "S105", # hard-coded test credentials
+    "S106",
+    "S108", # temporary paths in fixtures
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+plugins = ["pydantic.mypy"]
+exclude = ["^\\.venv/", "^uploads/", "^odd/"]

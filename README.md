@@ -170,7 +170,18 @@ LANGFUSE_ENABLED=false
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
 LANGFUSE_HOST=http://langfuse:3000
+
+# Seguridad (Opcional)
+API_KEY=                        # Si se define, /api/v1/* y /uploads/reports/* exigen el header X-API-Key
+ALLOWED_WEBHOOK_HOSTS=          # Hosts permitidos para webhooks http:// (https:// no lo requiere)
+MAX_UPLOAD_SIZE_MB=25           # Tamaño máximo de subida; por encima responde HTTP 413
 ```
+
+| Variable | Valor por defecto | Efecto |
+|---|---|---|
+| `API_KEY` | vacío (acceso abierto) | Activa la autenticación por header `X-API-Key` en `/api/v1/*` y en la descarga de reportes. `/health` permanece abierto. |
+| `ALLOWED_WEBHOOK_HOSTS` | vacío | Lista de hosts a los que se permite enviar webhooks por `http://`. Las IPs privadas, loopback y nombres internos siempre se bloquean (anti-SSRF). |
+| `MAX_UPLOAD_SIZE_MB` | `25` | Límite de tamaño por archivo subido. Si se supera, la API responde `413` y elimina el archivo parcial. |
 
 ### Paso 3: Desplegar la Infraestructura con Docker Compose
 ```bash
@@ -181,6 +192,8 @@ Una vez levantado:
 * **API REST & Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs)
 * **Dashboard de Observabilidad (Langfuse):** [http://localhost:3000](http://localhost:3000)
 * **Base de Datos PostgreSQL + pgvector:** `localhost:5432`
+
+> **Contenedores sin privilegios:** las imágenes de `api` y `frontend` se ejecutan con el usuario no-root `appuser` (uid 1000) e incluyen `HEALTHCHECK`. La imagen base de la API arranca sin `--reload`; `docker-compose.yml` lo añade solo para desarrollo.
 
 ---
 
@@ -196,19 +209,29 @@ Una vez levantado:
 | `POST` | `/api/v1/agent/chat` | Interacción multi-turno con el Agente Autónomo ReAct |
 | `POST` | `/api/v1/agent/chat/stream` | Respuestas en Streaming en tiempo real (Server-Sent Events) |
 | `GET` | `/api/v1/agent/sessions/{session_id}/history` | Historial persistido de una conversación |
-| `GET` | `/uploads/reports/{filename}` | Descarga de reportes PDF generados por el agente |
+| `GET` | `/uploads/reports/{filename}` | Descarga de reportes PDF generados por el agente (exige `X-API-Key` si `API_KEY` está definida; solo sirve archivos dentro de `uploads/reports/`) |
 
 ---
 
 ## 🧪 6. Ejecución de la Suite de Pruebas
 
-El sistema incluye una batería exhaustiva de **29 pruebas automatizadas** que validan la ingesta multimodal, el chunking jerárquico, la búsqueda híbrida con RRF, el reranking semántico, el streaming SSE, la telemetría resiliente, la persistencia en base de datos y el bucle ReAct del agente:
+El sistema incluye una batería de pruebas automatizadas que validan la ingesta multimodal, el chunking jerárquico, la búsqueda híbrida con RRF, el reranking semántico, el streaming SSE, la telemetría resiliente, la persistencia en base de datos, el bucle ReAct del agente y el endurecimiento de seguridad (SSRF, subidas, autenticación).
 
+**Dentro de Docker:**
 ```bash
 docker compose exec api pytest -v
 ```
 
-**Resultado de Ejecución:**
+**En local** (requiere PostgreSQL accesible según `.env`; las pruebas de integración del agente llaman a Gemini y necesitan `GOOGLE_API_KEY`):
+```bash
+python -m venv .venv
+.venv/Scripts/pip install -r requirements.txt   # Linux/macOS: .venv/bin/pip
+.venv/Scripts/python -m pytest -v               # Linux/macOS: .venv/bin/python
+```
+
+`tests/conftest.py` elimina al final de la sesión los PDF generados en `uploads/reports/` durante las pruebas, conservando los existentes.
+
+**Resultado de Ejecución (extracto):**
 ```
 tests/test_agent.py::test_generate_report_pdf PASSED                     [  3%]
 tests/test_agent.py::test_dispatch_webhook PASSED                        [  6%]
@@ -260,27 +283,26 @@ tests/test_telemetry.py::test_telemetry_service_exception_resilience PASSED [100
 │   ├── core/
 │   │   ├── config.py              # Pydantic BaseSettings (variables de entorno)
 │   │   ├── database.py            # Engine asyncpg, SessionMaker e inicialización DDL
+│   │   ├── security.py            # Autenticación opcional por header X-API-Key
 │   │   └── telemetry.py           # Servicio Singleton de Observabilidad con Langfuse
 │   ├── models/                    # Modelos ORM SQLAlchemy
 │   │   ├── chat.py                # ChatMessage (memoria relacional JSONB)
 │   │   └── document.py            # Document, DocumentChunk (pgvector), DocumentImage
-│   ├── repositories/              # Abstracción de acceso a datos
-│   │   ├── chat_repository.py
-│   │   └── document_repository.py
 │   ├── schemas/                   # Esquemas de validación y serialización Pydantic v2
 │   │   ├── agent.py
 │   │   ├── document.py
+│   │   ├── health.py
 │   │   └── search.py
 │   ├── services/                  # Lógica de negocio nuclear
 │   │   ├── agent.py               # Orquestador del Agente ReAct & Gemini Cascade
 │   │   ├── embedding.py           # Servicio de vectorización (text-embedding-004)
-│   │   ├── hybrid_search.py       # Algoritmo RRF sobre HNSW + GIN Full-Text
 │   │   ├── ingestion.py           # Pipeline de extracción, OCR y chunking jerárquico
+│   │   ├── rag_search.py          # Búsqueda híbrida RRF sobre HNSW + GIN Full-Text
 │   │   ├── reranker.py            # Servicio de Reranking Semántico con Gemini
 │   │   └── vision.py              # Extracción visual de diagramas y facturas
 │   ├── tools/                     # Herramientas ejecutables por el Agente
 │   │   ├── pdf_generator.py       # Generador de informes PDF con ReportLab
-│   │   ├── search_tool.py         # Interfaz a la base de datos vectorial
+│   │   ├── rag_tool.py            # Herramienta de búsqueda en la base de conocimiento
 │   │   └── webhook_tool.py        # Disparador asíncrono de webhooks HTTP
 │   └── main.py                    # Punto de entrada de la aplicación FastAPI
 ├── docker/
@@ -288,15 +310,21 @@ tests/test_telemetry.py::test_telemetry_service_exception_resilience PASSED [100
 ├── frontend/
 │   ├── app.py                     # Dashboard de usuario en Streamlit
 │   ├── Dockerfile
+│   └── requirements.txt           # Dependencias del frontend
 ├── tests/                         # Batería de pruebas unitarias y de integración
+│   ├── conftest.py                # Fixtures compartidas (limpieza de reportes PDF generados)
 │   ├── test_agent.py              # Agente ReAct, Function Calling, memoria y streaming
 │   ├── test_documents.py          # Extracción multimodal, tablas y chunking
 │   ├── test_health.py             # Endpoints de salud y base de datos
+│   ├── test_performance.py        # Trabajo bloqueante en hilos, índices, pool y deduplicación
 │   ├── test_reranker.py           # Scoring semántico y fallback determinístico
 │   ├── test_search.py             # Embeddings, RRF y búsqueda híbrida
+│   ├── test_security.py           # SSRF, subidas, escape XML, X-API-Key y errores 500
 │   └── test_telemetry.py          # DummySpan, DummyTrace y cliente Langfuse
 ├── docker-compose.yml             # Orquestación multicontenedor (api, frontend, db, langfuse)
-├── Dockerfile                     # Imagen de backend optimizada
+├── Dockerfile                     # Imagen de backend (usuario no-root + HEALTHCHECK)
+├── pyproject.toml                 # Configuración de ruff y mypy
+├── pytest.ini                     # Configuración de pytest (asyncio_mode = auto)
 ├── requirements.txt               # Dependencias Python
 └── README.md                      # Documentación ejecutiva del proyecto
 ```

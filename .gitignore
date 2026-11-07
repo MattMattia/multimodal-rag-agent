@@ -27,10 +27,6 @@ venv/
 ENV/
 env/
 
-# Environment variables
-.env
-!.env.example
-
 # IDEs & Editors
 .vscode/
 .idea/
@@ -45,11 +41,14 @@ htmlcov/
 # Local Database & Storage Data
 postgres_data/
 data/
-uploads/
 *.db
 *.sqlite3
 
 # Uploaded & Generated Media (preserve directory structure via .gitkeep)
+uploads/*
+!uploads/documents/
+!uploads/images/
+!uploads/reports/
 uploads/documents/*
 !uploads/documents/.gitkeep
 uploads/images/*

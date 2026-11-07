@@ -41,14 +41,31 @@ def test_generate_report_pdf():
 
 @pytest.mark.asyncio
 async def test_dispatch_webhook():
-    """Valida la ejecución de la herramienta de webhooks con httpx y simulación."""
-    result = await execute_dispatch_webhook(
-        event_type="invoice_alert",
-        payload={"invoice_id": "INV-1002", "amount": 1500.0, "status": "approved"},
-    )
-    assert result["status"] in ("delivered", "simulated", "warning")
+    """Validates the webhook tool against the default receiver without touching the real network."""
+    import socket
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    client = MagicMock()
+    client.post = AsyncMock(return_value=SimpleNamespace(status_code=200))
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    public_addr = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+    payload = {"invoice_id": "INV-1002", "amount": 1500.0, "status": "approved"}
+
+    with patch("app.tools.webhook_tool.socket.getaddrinfo", return_value=public_addr), patch(
+        "app.tools.webhook_tool.httpx.AsyncClient", MagicMock(return_value=client)
+    ):
+        result = await execute_dispatch_webhook(event_type="invoice_alert", payload=payload)
+
+    client.post.assert_awaited_once()
+    sent_body = client.post.await_args.kwargs["json"]
+    assert sent_body["event_type"] == "invoice_alert"
+    assert sent_body["data"] == payload
+    assert result["status"] == "delivered"
+    assert result["status_code"] == 200
     assert result["event_type"] == "invoice_alert"
-    assert "status_code" in result
+    assert result["target_url"] == "https://httpbin.org/post"
 
 
 @pytest.mark.asyncio
