@@ -18,6 +18,8 @@ st.set_page_config(
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 PUBLIC_API_URL = os.getenv("PUBLIC_API_URL", "http://localhost:8000")
+API_KEY = os.getenv("API_KEY", "")
+API_HEADERS = {"X-API-Key": API_KEY} if API_KEY else {}
 
 # CSS personalizado para pulir la interfaz
 st.markdown(
