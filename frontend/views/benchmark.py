@@ -1,23 +1,22 @@
 """Benchmark Lab: dense vs sparse vs hybrid retrieval quality (`POST /api/v1/demo/evaluate`)."""
 
-from typing import Any, Dict, List
-
-import pandas as pd
-import streamlit as st
+from typing import Any
 
 import api_client
+import pandas as pd
+import streamlit as st
 
 RESULT_KEY = "benchmark_result"
 ERROR_KEY = "benchmark_error"
 QUALITY_METRICS = (("hit_rate_at_k", "Hit rate@k"), ("mrr", "MRR"), ("ndcg_at_k", "NDCG@k"))
 
 
-def summary_rows(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+def summary_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
     rows = []
     for mode, metrics in (result.get("modes") or {}).items():
         if not isinstance(metrics, dict):
             continue
-        row: Dict[str, Any] = {"Modo": mode}
+        row: dict[str, Any] = {"Modo": mode}
         for field, label in QUALITY_METRICS:
             row[label] = metrics.get(field)
         row["Latencia media (ms)"] = metrics.get("avg_latency_ms")
@@ -26,7 +25,7 @@ def summary_rows(result: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
-def _render_embedding_banner(result: Dict[str, Any]) -> None:
+def _render_embedding_banner(result: dict[str, Any]) -> None:
     mode = result.get("embedding_mode", "desconocido")
     if mode == "gemini":
         st.success("Las métricas densas e híbridas usan embeddings reales de Gemini.", title="Embeddings: gemini")
@@ -39,7 +38,7 @@ def _render_embedding_banner(result: Dict[str, Any]) -> None:
         st.warning(str(warning), icon=":material/warning:")
 
 
-def _render_charts(rows: List[Dict[str, Any]]) -> None:
+def _render_charts(rows: list[dict[str, Any]]) -> None:
     frame = pd.DataFrame(rows)
     quality = frame.melt(
         id_vars="Modo", value_vars=[label for _, label in QUALITY_METRICS], var_name="Métrica", value_name="Valor"
@@ -55,7 +54,7 @@ def _render_charts(rows: List[Dict[str, Any]]) -> None:
         st.bar_chart(frame, x="Modo", y="Latencia media (ms)", alt="Latencia media por modo de búsqueda")
 
 
-def _render_per_query(result: Dict[str, Any]) -> None:
+def _render_per_query(result: dict[str, Any]) -> None:
     with st.expander("Desglose por consulta"):
         for mode, metrics in (result.get("modes") or {}).items():
             per_query = (metrics or {}).get("per_query") or []

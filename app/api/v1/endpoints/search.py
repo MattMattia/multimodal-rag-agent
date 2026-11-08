@@ -1,4 +1,5 @@
 import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,4 +41,4 @@ async def search_knowledge_base(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error_detail("Error interno durante la búsqueda", e),
-        )
+        ) from e

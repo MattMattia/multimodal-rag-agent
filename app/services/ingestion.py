@@ -1,13 +1,13 @@
 import asyncio
 import logging
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-import uuid
+from typing import Any
 
 import pdfplumber
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -33,13 +33,13 @@ def remove_document_images(document_id: uuid.UUID) -> None:
 try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 except ImportError:
-    class RecursiveCharacterTextSplitter:
+    class RecursiveCharacterTextSplitter:  # type: ignore[no-redef]
         """Divisor de texto de respaldo simple en caso de no tener langchain_text_splitters."""
-        def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 100, separators: Optional[List[str]] = None):
+        def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 100, separators: list[str] | None = None):
             self.chunk_size = chunk_size
             self.chunk_overlap = chunk_overlap
 
-        def split_text(self, text: str) -> List[str]:
+        def split_text(self, text: str) -> list[str]:
             if not text:
                 return []
             chunks = []
@@ -51,15 +51,15 @@ except ImportError:
             return chunks
 
 
-def table_to_markdown(table: List[List[Optional[str]]]) -> str:
+def table_to_markdown(table: list[list[str | None]]) -> str:
     """Convierte una matriz bidimensional de celdas (extraída con pdfplumber) a tabla Markdown."""
     if not table or not any(table):
         return ""
 
     # Limpiar y normalizar celdas
-    cleaned_table = []
+    cleaned_table: list[list[str]] = []
     for row in table:
-        cleaned_row = []
+        cleaned_row: list[str] = []
         for cell in row:
             if cell is None:
                 cleaned_row.append("")
@@ -76,9 +76,9 @@ def table_to_markdown(table: List[List[Optional[str]]]) -> str:
 
     num_cols = max(len(row) for row in cleaned_table)
     # Rellenar filas cortas si existieran
-    for row in cleaned_table:
-        while len(row) < num_cols:
-            row.append("")
+    for cleaned_cells in cleaned_table:
+        while len(cleaned_cells) < num_cols:
+            cleaned_cells.append("")
 
     header = cleaned_table[0]
     separator = ["---"] * num_cols
@@ -88,8 +88,8 @@ def table_to_markdown(table: List[List[Optional[str]]]) -> str:
         "| " + " | ".join(separator) + " |",
     ]
 
-    for row in cleaned_table[1:]:
-        markdown_lines.append("| " + " | ".join(row) + " |")
+    for cleaned_cells in cleaned_table[1:]:
+        markdown_lines.append("| " + " | ".join(cleaned_cells) + " |")
 
     return "\n".join(markdown_lines)
 
@@ -100,7 +100,7 @@ class ExtractedImage:
 
     index: int
     path: Path
-    bbox: Tuple[float, float, float, float]
+    bbox: tuple[float, float, float, float]
 
 
 @dataclass(frozen=True)
@@ -108,27 +108,27 @@ class ExtractedPage:
     """Datos planos extraídos de una página PDF (sin objetos pdfplumber ni sesión de BD)."""
 
     number: int
-    tables_markdown: List[str] = field(default_factory=list)
-    images: List[ExtractedImage] = field(default_factory=list)
+    tables_markdown: list[str] = field(default_factory=list)
+    images: list[ExtractedImage] = field(default_factory=list)
     text: str = ""
 
 
 def extract_pdf_pages_sync(
     file_path: Path, doc_id: uuid.UUID, images_output_dir: Path
-) -> Tuple[int, List[ExtractedPage]]:
+) -> tuple[int, list[ExtractedPage]]:
     """Lectura síncrona (CPU/IO) de un PDF con pdfplumber; debe ejecutarse con asyncio.to_thread.
 
     Devuelve el total de páginas y los datos planos de cada página (tablas en Markdown,
     rutas de imágenes guardadas y texto limpio).
     """
     images_output_dir.mkdir(parents=True, exist_ok=True)
-    pages: List[ExtractedPage] = []
+    pages: list[ExtractedPage] = []
 
     with pdfplumber.open(file_path) as pdf:
         total_pages = len(pdf.pages)
 
         for page_idx, page in enumerate(pdf.pages, start=1):
-            tables_markdown: List[str] = []
+            tables_markdown: list[str] = []
             for t_idx, table in enumerate(page.extract_tables() or [], start=1):
                 md_table = table_to_markdown(table)
                 if md_table:
@@ -136,7 +136,7 @@ def extract_pdf_pages_sync(
                         f"### [Tabla Página {page_idx} - Ítem {t_idx}]\n{md_table}"
                     )
 
-            images: List[ExtractedImage] = []
+            images: list[ExtractedImage] = []
             for img_idx, img_meta in enumerate(page.images or [], start=1):
                 try:
                     x0 = img_meta.get("x0", 0)
@@ -187,10 +187,10 @@ class IngestionService:
 
     def __init__(
         self,
-        parent_chunk_size: Optional[int] = None,
-        parent_chunk_overlap: Optional[int] = None,
-        child_chunk_size: Optional[int] = None,
-        child_chunk_overlap: Optional[int] = None,
+        parent_chunk_size: int | None = None,
+        parent_chunk_overlap: int | None = None,
+        child_chunk_size: int | None = None,
+        child_chunk_overlap: int | None = None,
     ):
         # Sin argumentos explícitos se usan PARENT_/CHILD_CHUNK_* de Settings (1200/120 y 350/40 por defecto)
         parent_chunk_size = settings.PARENT_CHUNK_SIZE if parent_chunk_size is None else parent_chunk_size
@@ -232,7 +232,7 @@ class IngestionService:
                 file_type = doc.file_type.lower()
                 total_chunks = 0
                 total_images = 0
-                metadata_summary: Dict[str, Any] = {}
+                metadata_summary: dict[str, Any] = {}
 
                 # 3. Procesamiento según tipo de archivo
                 if "pdf" in file_type or file_path.suffix.lower() == ".pdf":
@@ -261,7 +261,7 @@ class IngestionService:
                     logger.info("Generando embeddings para %d fragmentos...", len(chunks_to_embed))
                     texts = [c.content for c in chunks_to_embed]
                     vectors = await embedding_service.get_embeddings_batch(texts)
-                    for chunk, vector in zip(chunks_to_embed, vectors):
+                    for chunk, vector in zip(chunks_to_embed, vectors, strict=False):
                         chunk.embedding = vector
 
                 # 5. Finalización exitosa
@@ -300,7 +300,7 @@ class IngestionService:
 
     async def _process_pdf(
         self, db: AsyncSession, doc: Document, file_path: Path
-    ) -> Tuple[int, int, Dict[str, Any]]:
+    ) -> tuple[int, int, dict[str, Any]]:
         """Extrae texto, tablas e imágenes de un archivo PDF y genera chunks jerárquicos.
 
         La lectura con pdfplumber corre en un hilo; Gemini Vision y SQLAlchemy permanecen en el event loop.
@@ -315,7 +315,7 @@ class IngestionService:
 
         for page in pages:
             page_idx = page.number
-            page_text_elements: List[str] = []
+            page_text_elements: list[str] = []
 
             # --- A. Tablas ---
             for t_idx, table_content in enumerate(page.tables_markdown, start=1):
@@ -408,7 +408,7 @@ class IngestionService:
         chunk_type: str,
         page_number: int,
         prefix_first: str,
-        extra_parent_metadata: Dict[str, Any],
+        extra_parent_metadata: dict[str, Any],
     ) -> int:
         """Añade chunks padre e hijos a la sesión con ids pre-generados (sin flush por iteración)."""
         added = 0
@@ -451,7 +451,7 @@ class IngestionService:
 
     async def _process_standalone_image(
         self, db: AsyncSession, doc: Document, file_path: Path
-    ) -> Tuple[int, int, Dict[str, Any]]:
+    ) -> tuple[int, int, dict[str, Any]]:
         """Procesa una imagen directa (factura, recibo, diagrama) usando Gemini 1.5 Flash."""
         total_images = 1
 

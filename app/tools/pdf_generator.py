@@ -1,11 +1,11 @@
-from datetime import datetime
 import io
 import json
 import logging
-from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional
 import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
@@ -22,9 +22,9 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 def execute_generate_report_pdf(
     title: str,
     summary: str,
-    key_points: Optional[List[str]] = None,
-    sections: Optional[List[Dict[str, str]]] = None,
-) -> Dict[str, Any]:
+    key_points: list[str] | None = None,
+    sections: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     """Genera un informe ejecutivo profesional en formato PDF utilizando ReportLab.
 
     Args:
@@ -165,7 +165,7 @@ def execute_generate_report_pdf(
 
 
 
-def build_conversation_pdf(session_id: uuid.UUID, messages: List[Dict[str, Any]]) -> bytes:
+def build_conversation_pdf(session_id: uuid.UUID, messages: list[dict[str, Any]]) -> bytes:
     """Maqueta una conversación completa (mensajes, citas y herramientas) como PDF ejecutivo en memoria.
 
     Síncrona (CPU): ejecutar con asyncio.to_thread. Todo el texto se escapa para ReportLab.
@@ -195,7 +195,7 @@ def build_conversation_pdf(session_id: uuid.UUID, messages: List[Dict[str, Any]]
         textColor=colors.HexColor("#475569"), spaceAfter=2,
     )
 
-    elements: List[Any] = [
+    elements: list[Any] = [
         Paragraph("Conversación con el Agente IA", title_style),
         Paragraph(
             escape(f"Sesión {session_id} | Exportado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"),

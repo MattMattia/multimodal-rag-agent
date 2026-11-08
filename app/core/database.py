@@ -1,6 +1,6 @@
-from collections.abc import AsyncGenerator
 import logging
-from typing import Any, Dict
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
@@ -24,7 +24,7 @@ def build_engine(url: str) -> AsyncEngine:
 
     `sqlite+aiosqlite` lanza TypeError si recibe `pool_size`/`max_overflow`.
     """
-    kwargs: Dict[str, Any] = {"echo": settings.DEBUG, "future": True, "pool_pre_ping": True}
+    kwargs: dict[str, Any] = {"echo": settings.DEBUG, "future": True, "pool_pre_ping": True}
     if _is_postgres_url(url):
         kwargs.update(
             pool_size=10,

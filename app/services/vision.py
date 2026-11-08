@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Optional
+
 from PIL import Image
 
 from app.core.config import settings
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 try:
     from google import genai
 except ImportError:  # pragma: no cover - google-genai es dependencia obligatoria
-    genai = None
+    genai = None  # type: ignore[assignment]
 
 
 PROMPT_TECHNICAL_IMAGE = """Eres un asistente de IA experto en análisis de documentos y visión por computadora.
@@ -39,7 +39,7 @@ class VisionService:
         self.model_name = settings.GEMINI_VISION_MODEL
         self._initialized = False
         self._client = None
-        self._working_model: Optional[str] = None
+        self._working_model: str | None = None
 
     def _ensure_client(self):
         """Inicializa o actualiza el cliente de Gemini si la API key se configuró dinámicamente."""

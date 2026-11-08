@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.core.config import settings
 from app.core.telemetry import telemetry_service
@@ -30,7 +30,7 @@ class RerankerService:
         self.model_name = settings.GEMINI_AGENT_MODEL
         self.api_key = settings.GOOGLE_API_KEY
         self._client = None
-        self._working_model: Optional[str] = None
+        self._working_model: str | None = None
         self._ensure_client()
 
     def _ensure_client(self) -> bool:
@@ -58,9 +58,9 @@ class RerankerService:
     async def rerank(
         self,
         query: str,
-        candidates: List[Dict[str, Any]],
+        candidates: list[dict[str, Any]],
         top_n: int = 4,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Reordena semánticamente una lista de fragmentos candidatos respecto a la consulta.
 
         Args:
@@ -114,9 +114,9 @@ class RerankerService:
     async def _score_with_gemini(
         self,
         query: str,
-        candidates: List[Dict[str, Any]],
+        candidates: list[dict[str, Any]],
         top_n: int,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Envía los fragmentos a Gemini para calificar su relevancia semántica de 0.0 a 1.0."""
         chunks_text = []
         for idx, c in enumerate(candidates):
@@ -208,7 +208,7 @@ Ejemplo de respuesta esperada:
 
         return scored_candidates[:top_n]
 
-    def _parse_scoring_json(self, raw_text: str) -> Dict[int, float]:
+    def _parse_scoring_json(self, raw_text: str) -> dict[int, float]:
         """Extrae el mapa index -> score del texto retornado por el LLM."""
         clean_text = raw_text.strip()
         # Remover bloques de código markdown si existen
@@ -216,7 +216,7 @@ Ejemplo de respuesta esperada:
             clean_text = re.sub(r"^```(?:json)?\s*", "", clean_text)
             clean_text = re.sub(r"\s*```$", "", clean_text)
 
-        scores_map: Dict[int, float] = {}
+        scores_map: dict[int, float] = {}
         try:
             parsed = json.loads(clean_text)
             if isinstance(parsed, list):
@@ -231,16 +231,16 @@ Ejemplo de respuesta esperada:
             for m_idx, m_score in matches:
                 try:
                     scores_map[int(m_idx)] = max(0.0, min(1.0, float(m_score)))
-                except Exception:
-                    pass
+                except (ValueError, TypeError):
+                    logger.debug("Puntaje de reranking no numérico: %r", m_score)
 
         return scores_map
 
     def _apply_deterministic_fallback(
         self,
-        candidates: List[Dict[str, Any]],
+        candidates: list[dict[str, Any]],
         top_n: int,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fallback determinístico que preserva el ordenamiento original RRF y calcula un rerank_score normalizado."""
         results = []
         for idx, c in enumerate(candidates[:top_n]):

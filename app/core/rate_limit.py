@@ -4,12 +4,12 @@ Pensado para una sola instancia de la API (demo/portafolio): el estado vive en e
 La IP es la del socket (`scope["client"]`); no se confía en `X-Forwarded-For` porque es falsificable.
 """
 
-from collections import deque
 import math
 import os
 import sys
 import time
-from typing import Callable, Deque, Dict, Tuple
+from collections import deque
+from collections.abc import Callable
 
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -30,10 +30,10 @@ class SlidingWindowRateLimiter:
 
     def __init__(self, clock: Callable[[], float] = time.monotonic):
         self._clock = clock
-        self._hits: Dict[str, Deque[float]] = {}
+        self._hits: dict[str, deque[float]] = {}
         self._checks = 0
 
-    def check(self, key: str, limit: int) -> Tuple[bool, int]:
+    def check(self, key: str, limit: int) -> tuple[bool, int]:
         """Registra una petición. Devuelve (permitida, segundos_hasta_poder_reintentar)."""
         now = self._clock()
         self._checks += 1

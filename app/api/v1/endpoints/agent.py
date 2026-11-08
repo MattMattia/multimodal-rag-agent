@@ -1,8 +1,9 @@
 import asyncio
-from datetime import datetime, timezone
 import logging
-from typing import Any, Dict, List, Literal
 import uuid
+from datetime import UTC, datetime
+from typing import Any, Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, func, select
@@ -94,7 +95,7 @@ async def chat_with_agent(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error_detail("Error interno durante la ejecución del agente", e),
-        )
+        ) from e
 
 
 @router.get(
@@ -126,7 +127,7 @@ async def get_session_history(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error_detail("Error interno al recuperar historial", e),
-        )
+        ) from e
 
 
 TITLE_MAX_CHARS = 80
@@ -134,7 +135,7 @@ TITLE_MAX_CHARS = 80
 
 @router.get(
     "/sessions",
-    response_model=List[SessionSummary],
+    response_model=list[SessionSummary],
     summary="Listar sesiones de chat existentes",
 )
 async def list_sessions(db: AsyncSession = Depends(get_db)):
@@ -158,7 +159,7 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
         .where(ChatMessage.role == "user", ChatMessage.session_id.in_([r[0] for r in rows]))
         .order_by(ChatMessage.created_at.asc())
     )
-    titles: Dict[uuid.UUID, str] = {}
+    titles: dict[uuid.UUID, str] = {}
     for session_id, content in first_user.all():
         titles.setdefault(session_id, content[:TITLE_MAX_CHARS])
 
@@ -181,14 +182,14 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
 )
 async def delete_session(session_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
-    if not result.rowcount:
+    if not result.rowcount:  # type: ignore[attr-defined]  # CursorResult for DML
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesión no encontrada.")
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def _message_dict(msg: ChatMessage) -> Dict[str, Any]:
+def _message_dict(msg: ChatMessage) -> dict[str, Any]:
     return {
         "role": msg.role,
         "content": msg.content,
@@ -198,7 +199,7 @@ def _message_dict(msg: ChatMessage) -> Dict[str, Any]:
     }
 
 
-def _conversation_markdown(session_id: uuid.UUID, messages: List[Dict[str, Any]]) -> str:
+def _conversation_markdown(session_id: uuid.UUID, messages: list[dict[str, Any]]) -> str:
     lines = [f"# Conversación {session_id}", ""]
     for msg in messages:
         label = {"user": "Usuario", "assistant": "Agente"}.get(msg["role"], msg["role"])
@@ -264,7 +265,7 @@ async def submit_feedback(request: FeedbackRequest, db: AsyncSession = Depends(g
     feedback = {
         "rating": request.rating,
         "comment": request.comment,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
     # Reasignar un dict nuevo para que SQLAlchemy detecte el cambio en la columna JSON
     message.message_metadata = {**(message.message_metadata or {}), "feedback": feedback}

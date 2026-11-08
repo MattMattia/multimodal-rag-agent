@@ -5,13 +5,12 @@ Todos los textos usan caracteres Latin-1 para que las fuentes estándar de Repor
 """
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 
 @dataclass(frozen=True)
 class GoldenTable:
-    header: Tuple[str, ...]
-    rows: Tuple[Tuple[str, ...], ...]
+    header: tuple[str, ...]
+    rows: tuple[tuple[str, ...], ...]
 
     def to_markdown(self) -> str:
         lines = [
@@ -24,8 +23,8 @@ class GoldenTable:
 
 @dataclass(frozen=True)
 class GoldenPage:
-    sections: Tuple[Tuple[str, str], ...] = ()  # (encabezado, texto)
-    table: Optional[GoldenTable] = None
+    sections: tuple[tuple[str, str], ...] = ()  # (encabezado, texto)
+    table: GoldenTable | None = None
     table_title: str = ""
     show_image: bool = False
 
@@ -34,7 +33,7 @@ class GoldenPage:
 class GoldenDocument:
     filename: str
     title: str
-    pages: Tuple[GoldenPage, ...]
+    pages: tuple[GoldenPage, ...]
     image_filename: str
     image_kind: str  # "architecture" | "bars" | "matrix"
     image_caption: str
@@ -222,5 +221,5 @@ SEGURIDAD = GoldenDocument(
     ),
 )
 
-GOLDEN_DOCUMENTS: Tuple[GoldenDocument, ...] = (ARQUITECTURA, FINANCIERO, SEGURIDAD)
-GOLDEN_FILENAMES: Tuple[str, ...] = tuple(d.filename for d in GOLDEN_DOCUMENTS)
+GOLDEN_DOCUMENTS: tuple[GoldenDocument, ...] = (ARQUITECTURA, FINANCIERO, SEGURIDAD)
+GOLDEN_FILENAMES: tuple[str, ...] = tuple(d.filename for d in GOLDEN_DOCUMENTS)

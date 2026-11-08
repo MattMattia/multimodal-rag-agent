@@ -4,8 +4,9 @@ import logging
 import os
 import re
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 import uuid
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,12 +54,12 @@ Reglas esenciales:
 """
 
 
-def _split_preserving_whitespace(text: str) -> List[str]:
+def _split_preserving_whitespace(text: str) -> list[str]:
     """Split text into word-sized chunks without losing any character (spaces, newlines, indentation)."""
     return re.findall(r"\s*\S+\s*|\s+", text)
 
 
-def _usage_from_response(response: Any) -> Optional[Dict[str, int]]:
+def _usage_from_response(response: Any) -> dict[str, int] | None:
     """Extrae el consumo de tokens de `usage_metadata` (None si el SDK no lo reporta)."""
     usage_meta = getattr(response, "usage_metadata", None)
     if not usage_meta:
@@ -70,7 +71,7 @@ def _usage_from_response(response: Any) -> Optional[Dict[str, int]]:
     }
 
 
-def _get_tool_declarations() -> List[Any]:
+def _get_tool_declarations() -> list[Any]:
     """Define las especificaciones de las herramientas para Gemini Function Calling."""
     if not _USE_MODERN_GENAI:
         return []
@@ -176,19 +177,19 @@ class AutonomousAgentService:
         return False
 
     @staticmethod
-    def _resolve_temperature(options: Optional[AgentOptions]) -> float:
+    def _resolve_temperature(options: AgentOptions | None) -> float:
         if options is not None and options.temperature is not None:
             return options.temperature
         return settings.AGENT_TEMPERATURE
 
     @staticmethod
-    def _resolve_max_turns(options: Optional[AgentOptions]) -> int:
+    def _resolve_max_turns(options: AgentOptions | None) -> int:
         if options is not None and options.max_turns is not None:
             return options.max_turns
         return settings.AGENT_MAX_TURNS
 
     @staticmethod
-    def _last_diagnostics(tools: List[ToolExecutionRecord]) -> Optional[SearchDiagnostics]:
+    def _last_diagnostics(tools: list[ToolExecutionRecord]) -> SearchDiagnostics | None:
         """Rayos X de la última búsqueda RAG ejecutada en el turno (None si no hubo ninguna)."""
         for record in reversed(tools):
             if record.diagnostics is not None:
@@ -196,7 +197,7 @@ class AutonomousAgentService:
         return None
 
     @classmethod
-    def _diagnostics_json(cls, tools: List[ToolExecutionRecord]) -> Optional[Dict[str, Any]]:
+    def _diagnostics_json(cls, tools: list[ToolExecutionRecord]) -> dict[str, Any] | None:
         last = cls._last_diagnostics(tools)
         return last.model_dump() if last is not None else None
 
@@ -221,8 +222,8 @@ class AutonomousAgentService:
         self,
         db: AsyncSession,
         user_message: str,
-        session_id: Optional[uuid.UUID] = None,
-        options: Optional[AgentOptions] = None,
+        session_id: uuid.UUID | None = None,
+        options: AgentOptions | None = None,
     ) -> AgentChatResponse:
         """Ejecuta un turno completo de interacción con el agente autónomo y persiste la memoria en PostgreSQL."""
         turn_started = time.perf_counter()
@@ -340,10 +341,10 @@ class AutonomousAgentService:
 
     async def _call_gemini_with_fallback(
         self,
-        contents: List[Any],
+        contents: list[Any],
         config: Any,
-        preferred_model: Optional[str] = None,
-    ) -> Tuple[Any, str]:
+        preferred_model: str | None = None,
+    ) -> tuple[Any, str]:
         """Ejecuta generate_content probando el modelo preferido y recurriendo a modelos compatibles si está deprecado/sin cuota."""
         candidate_models = [
             getattr(self, "_working_model", None) or preferred_model or self.model_name,
@@ -360,7 +361,7 @@ class AutonomousAgentService:
                 seen.add(m)
                 unique_models.append(m)
 
-        last_exc = None
+        last_exc: Exception | None = None
         for m in unique_models:
             try:
                 logger.info("Invocando modelo Gemini: %s", m)
@@ -384,13 +385,13 @@ class AutonomousAgentService:
                     raise e
 
         logger.error("Todos los modelos candidatos de Gemini fallaron. Último error: %s", last_exc, exc_info=True)
-        raise last_exc
+        raise last_exc or RuntimeError("Ningún modelo candidato de Gemini disponible.")
 
     async def _call_gemini_stream_with_fallback(
         self,
-        contents: List[Any],
+        contents: list[Any],
         config: Any,
-        preferred_model: Optional[str] = None,
+        preferred_model: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """Ejecuta generate_content_stream probando la cascada de modelos compatibles y produciendo tokens en vivo."""
         candidate_models = [
@@ -408,7 +409,7 @@ class AutonomousAgentService:
                 seen.add(m)
                 unique_models.append(m)
 
-        last_exc = None
+        last_exc: Exception | None = None
         for m in unique_models:
             try:
                 logger.info("Invocando streaming con modelo Gemini: %s", m)
@@ -435,14 +436,14 @@ class AutonomousAgentService:
                     raise e
 
         logger.error("Todos los modelos candidatos de stream fallaron. Último error: %s", last_exc, exc_info=True)
-        raise last_exc
+        raise last_exc or RuntimeError("Ningún modelo candidato de Gemini disponible.")
 
     async def execute_turn_stream(
         self,
         db: AsyncSession,
         user_message: str,
-        session_id: Optional[uuid.UUID] = None,
-        options: Optional[AgentOptions] = None,
+        session_id: uuid.UUID | None = None,
+        options: AgentOptions | None = None,
     ) -> AsyncGenerator[str, None]:
         """Ejecuta el turno del agente en streaming SSE estructurado (tool_end, tokens y metadata), persistiendo en BD."""
         turn_started = time.perf_counter()
@@ -475,8 +476,8 @@ class AutonomousAgentService:
         db.add(user_chat_record)
         await db.commit()
 
-        executed_tools: List[ToolExecutionRecord] = []
-        collected_citations: List[CitationItem] = []
+        executed_tools: list[ToolExecutionRecord] = []
+        collected_citations: list[CitationItem] = []
         full_response = ""
 
         def _to_json_safe(data: Any) -> Any:
@@ -517,7 +518,7 @@ class AutonomousAgentService:
                     temperature=temperature,
                 )
 
-                contents: List[types.Content] = []
+                contents: list[types.Content] = []
                 for msg in prior_messages[-settings.AGENT_MAX_HISTORY_MESSAGES:]:
                     if msg.role == "user":
                         contents.append(types.Content(role="user", parts=[types.Part.from_text(text=msg.content)]))
@@ -573,7 +574,7 @@ class AutonomousAgentService:
                             span_type="tool",
                             input=tool_args,
                         ) as tool_span:
-                            tool_meta: Dict[str, Any] = {}
+                            tool_meta: dict[str, Any] = {}
                             tool_started = time.perf_counter()
                             tool_result, tool_citations = await self._dispatch_tool_call(
                                 db=db, tool_name=tool_name, tool_args=tool_args, options=options, tool_meta=tool_meta
@@ -706,13 +707,13 @@ class AutonomousAgentService:
         db: AsyncSession,
         user_message: str,
         session_id: uuid.UUID,
-        prior_messages: List[ChatMessage],
-        trace: Optional[Any] = None,
-        options: Optional[AgentOptions] = None,
+        prior_messages: list[ChatMessage],
+        trace: Any | None = None,
+        options: AgentOptions | None = None,
     ) -> AgentChatResponse:
         """Ejecuta el ciclo ReAct y Function Calling con el modelo Gemini configurado."""
-        executed_tools: List[ToolExecutionRecord] = []
-        collected_citations: List[CitationItem] = []
+        executed_tools: list[ToolExecutionRecord] = []
+        collected_citations: list[CitationItem] = []
 
         # 1. Preparar configuración de Function Calling
         temperature = self._resolve_temperature(options)
@@ -726,7 +727,7 @@ class AutonomousAgentService:
         )
 
         # 2. Historial de conversación multi-turno para el modelo
-        contents: List[types.Content] = []
+        contents: list[types.Content] = []
         for msg in prior_messages[-settings.AGENT_MAX_HISTORY_MESSAGES:]:
             if msg.role == "user":
                 contents.append(
@@ -798,7 +799,7 @@ class AutonomousAgentService:
                     span_type="tool",
                     input=tool_args,
                 ) as tool_span:
-                    tool_meta: Dict[str, Any] = {}
+                    tool_meta: dict[str, Any] = {}
                     tool_started = time.perf_counter()
                     tool_result, tool_citations = await self._dispatch_tool_call(
                         db=db, tool_name=tool_name, tool_args=tool_args, options=options, tool_meta=tool_meta
@@ -845,22 +846,22 @@ class AutonomousAgentService:
         self,
         db: AsyncSession,
         tool_name: str,
-        tool_args: Dict[str, Any],
-        options: Optional[AgentOptions] = None,
-        tool_meta: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Any, List[CitationItem]]:
+        tool_args: dict[str, Any],
+        options: AgentOptions | None = None,
+        tool_meta: dict[str, Any] | None = None,
+    ) -> tuple[Any, list[CitationItem]]:
         """Despacha la ejecución de una herramienta específica y extrae citas si aplica.
 
         `tool_meta` es un parámetro de salida opcional: se rellena con `diagnostics` (rayos X) de las búsquedas RAG.
         """
-        citations: List[CitationItem] = []
+        citations: list[CitationItem] = []
 
         try:
             if tool_name == "search_knowledge_base":
                 query = tool_args.get("query", "")
                 default_top_k = options.top_k if options is not None and options.top_k else 5
                 top_k = int(tool_args.get("top_k", default_top_k))
-                search_kwargs: Dict[str, Any] = {}
+                search_kwargs: dict[str, Any] = {}
                 if options is not None:
                     search_kwargs = {
                         "mode": options.search_mode,
@@ -913,16 +914,16 @@ class AutonomousAgentService:
         db: AsyncSession,
         user_message: str,
         session_id: uuid.UUID,
-        prior_messages: Optional[List[ChatMessage]] = None,
+        prior_messages: list[ChatMessage] | None = None,
         api_error_notice: str = "",
-        trace: Optional[Any] = None,
-        options: Optional[AgentOptions] = None,
+        trace: Any | None = None,
+        options: AgentOptions | None = None,
     ) -> AgentChatResponse:
         """Modo determinístico de respaldo para desarrollo local y pruebas unitarias sin API key activa."""
         msg_lower = user_message.lower()
-        executed_tools: List[ToolExecutionRecord] = []
-        collected_citations: List[CitationItem] = []
-        response_paragraphs: List[str] = []
+        executed_tools: list[ToolExecutionRecord] = []
+        collected_citations: list[CitationItem] = []
+        response_paragraphs: list[str] = []
 
         # Si hay historial previo y el usuario hace una pregunta de seguimiento, enriquecer la búsqueda
         search_query = user_message
@@ -945,7 +946,7 @@ class AutonomousAgentService:
         if needs_search:
             # top_k: el valor explícito de la solicitud; si no se envió, el 3 histórico del modo de respaldo
             fallback_top_k = options.top_k if options is not None and options.top_k else 3
-            search_kwargs: Dict[str, Any] = {}
+            search_kwargs: dict[str, Any] = {}
             if options is not None:
                 search_kwargs = {
                     "mode": options.search_mode,
@@ -1098,7 +1099,7 @@ class AutonomousAgentService:
             session_id=session_id,
         )
 
-    def _deduplicate_citations(self, citations: List[CitationItem]) -> List[CitationItem]:
+    def _deduplicate_citations(self, citations: list[CitationItem]) -> list[CitationItem]:
         """Elimina citas duplicadas para mantener la lista limpia."""
         seen = set()
         unique = []

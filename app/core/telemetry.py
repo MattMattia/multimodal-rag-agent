@@ -3,14 +3,15 @@ import contextvars
 import logging
 import os
 import time
-from typing import Any, Dict, Generator, List, Optional
+from collections.abc import Generator
+from typing import Any
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # Active telemetry parent (trace or span) so nested calls with parent=None attach correctly.
-_active_telemetry_parent: contextvars.ContextVar[Optional[Any]] = contextvars.ContextVar(
+_active_telemetry_parent: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
     "_active_telemetry_parent", default=None
 )
 
@@ -96,7 +97,7 @@ class TelemetryService:
     """
 
     def __init__(self):
-        self._client: Optional[Any] = None
+        self._client: Any | None = None
         self._enabled = False
         self._initialized = False
         self._init_client()
@@ -161,11 +162,11 @@ class TelemetryService:
     def start_trace(
         self,
         name: str,
-        session_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        input: Optional[Any] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        tags: Optional[List[str]] = None,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        input: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
     ) -> Any:
         """Crea la traza raíz y la registra como padre activo para spans anidados con parent=None."""
         trace = self._create_trace(
@@ -186,11 +187,11 @@ class TelemetryService:
     def _create_trace(
         self,
         name: str,
-        session_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        input: Optional[Any] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        tags: Optional[List[str]] = None,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        input: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
     ) -> Any:
         if not self.is_enabled or not self._client:
             return DummyTrace(name=name, id=session_id or "local")
@@ -221,11 +222,11 @@ class TelemetryService:
     @contextlib.contextmanager
     def span(
         self,
-        parent: Optional[Any],
+        parent: Any | None,
         name: str,
         span_type: str = "span",
-        input: Optional[Any] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        input: Any | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Generator[Any, None, None]:
         """Context manager para instrumentar spans de ejecución registrando automáticamente latencia."""
         start_time = time.time()
@@ -252,14 +253,14 @@ class TelemetryService:
                     )
                 # Si no hay padre pero el cliente soporta span directo (Langfuse v2)
                 elif parent is None and hasattr(self._client, "span"):
-                    span_obj = self._client.span(
+                    span_obj = self._client.span(  # type: ignore[union-attr]
                         name=name,
                         input=input,
                         metadata=metadata or {},
                     )
                 # Si no hay padre pero el cliente soporta start_observation (v4)
                 elif parent is None and hasattr(self._client, "start_observation"):
-                    span_obj = self._client.start_observation(
+                    span_obj = self._client.start_observation(  # type: ignore[union-attr]
                         name=name,
                         as_type=span_type if span_type in ("span", "tool", "chain", "agent", "retriever") else "span",
                         input=input,
@@ -286,13 +287,13 @@ class TelemetryService:
 
     def record_generation(
         self,
-        parent: Optional[Any],
+        parent: Any | None,
         name: str,
         model: str,
         input: Any,
         output: Any,
-        usage: Optional[Dict[str, int]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        usage: dict[str, int] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Any:
         """Registra un evento de generación LLM con modelo, consumo de tokens y prompts."""
         if parent is None:
@@ -335,7 +336,7 @@ class TelemetryService:
         name: str,
         value: float,
         trace_id: str,
-        comment: Optional[str] = None,
+        comment: str | None = None,
     ) -> bool:
         """Envía un score (p. ej. feedback de usuario) a Langfuse; no hace nada si la telemetría está inactiva."""
         if not self.is_enabled or not self._client:

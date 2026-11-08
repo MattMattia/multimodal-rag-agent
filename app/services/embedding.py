@@ -2,7 +2,6 @@ import asyncio
 import hashlib
 import logging
 import math
-from typing import List, Optional
 
 from app.core.config import settings
 
@@ -18,10 +17,10 @@ try:
     from google.genai import types as genai_types
     _USE_MODERN_GENAI = True
 except ImportError:
-    genai_types = None
+    genai_types = None  # type: ignore[assignment]
 
 
-def _l2_normalize(values) -> List[float]:
+def _l2_normalize(values) -> list[float]:
     """gemini-embedding-001 only returns unit vectors at 3072 dims; truncated outputs must be normalized."""
     vector = [float(x) for x in values]
     norm = math.sqrt(sum(x * x for x in vector))
@@ -52,7 +51,7 @@ class EmbeddingService:
                 except Exception as e:
                     logger.error("Error al inicializar cliente de embeddings: %s", e)
 
-    def _generate_mock_embedding(self, text: str) -> List[float]:
+    def _generate_mock_embedding(self, text: str) -> list[float]:
         """Genera un vector unitario determinístico de 768 dimensiones basado en el hash del texto.
 
         Permite ejecutar pruebas unitarias y desarrollo local sin agotar cuota ni fallar sin internet.
@@ -60,7 +59,7 @@ class EmbeddingService:
         vector = []
         for i in range(self.dimension):
             # Combinación de hash SHA-256 con índice para producir valores pseudo-aleatorios estables
-            h = hashlib.sha256(f"{text}_{i}".encode("utf-8")).digest()
+            h = hashlib.sha256(f"{text}_{i}".encode()).digest()
             val = (int.from_bytes(h[:4], "big") / 2**32) - 0.5
             vector.append(val)
 
@@ -105,7 +104,7 @@ class EmbeddingService:
                 await asyncio.sleep(delay)
                 attempt += 1
 
-    async def get_embedding(self, text: str) -> List[float]:
+    async def get_embedding(self, text: str) -> list[float]:
         """Obtiene el embedding de un texto individual."""
         if not text or not text.strip():
             return [0.0] * self.dimension
@@ -124,8 +123,8 @@ class EmbeddingService:
         raise RuntimeError("La API de embeddings devolvió una respuesta sin vectores.")
 
     async def get_embeddings_batch(
-        self, texts: List[str], batch_size: Optional[int] = None
-    ) -> List[List[float]]:
+        self, texts: list[str], batch_size: int | None = None
+    ) -> list[list[float]]:
         """Genera embeddings en lotes para optimizar llamadas a la API."""
         if not texts:
             return []
@@ -136,7 +135,7 @@ class EmbeddingService:
         if not self._initialized or not self._client:
             return [self._generate_mock_embedding(t) for t in texts]
 
-        all_embeddings: List[List[float]] = []
+        all_embeddings: list[list[float]] = []
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]

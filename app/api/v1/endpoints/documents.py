@@ -1,8 +1,7 @@
 import logging
-from pathlib import Path
 import re
-from typing import List, Optional
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
@@ -130,7 +129,7 @@ async def upload_document(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error_detail("No se pudo guardar el archivo en el servidor", e),
-        )
+        ) from e
     finally:
         await file.close()
 
@@ -161,7 +160,7 @@ async def upload_document(
 
 @router.get(
     "",
-    response_model=List[DocumentResponse],
+    response_model=list[DocumentResponse],
     summary="Listar documentos registrados",
 )
 async def list_documents(
@@ -259,12 +258,12 @@ async def get_document(
 
 @router.get(
     "/{document_id}/chunks",
-    response_model=List[DocumentChunkResponse],
+    response_model=list[DocumentChunkResponse],
     summary="Listar fragmentos (chunks) de un documento",
 )
 async def get_document_chunks(
     document_id: uuid.UUID,
-    chunk_type: Optional[str] = Query(None, description="Filtrar por tipo: 'text', 'table', 'image_description'"),
+    chunk_type: str | None = Query(None, description="Filtrar por tipo: 'text', 'table', 'image_description'"),
     parent_only: bool = Query(False, description="Si es True, retorna solo los fragmentos padre"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -286,7 +285,7 @@ async def get_document_chunks(
 
 @router.get(
     "/{document_id}/images",
-    response_model=List[DocumentImageResponse],
+    response_model=list[DocumentImageResponse],
     summary="Listar imágenes y descripciones de Gemini de un documento",
 )
 async def get_document_images(

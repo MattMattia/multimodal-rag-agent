@@ -10,9 +10,9 @@ import asyncio
 import logging
 import time
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 from xml.sax.saxutils import escape
 
 from PIL import Image, ImageDraw, ImageFont
@@ -138,7 +138,7 @@ def _generate_png(doc: GoldenDocument, path: Path) -> None:
 # --------------------------------------------------------------------------------------------------
 def _generate_pdf(doc: GoldenDocument, pdf_path: Path, image_path: Path) -> None:
     styles = getSampleStyleSheet()
-    story: List[Any] = [Paragraph(escape(doc.title), styles["Title"]), Spacer(1, 0.3 * cm)]
+    story: list[Any] = [Paragraph(escape(doc.title), styles["Title"]), Spacer(1, 0.3 * cm)]
     for page_index, page in enumerate(doc.pages):
         if page_index:
             story.append(PageBreak())
@@ -187,7 +187,7 @@ def ensure_demo_files() -> int:
 # --------------------------------------------------------------------------------------------------
 # Base de datos
 # --------------------------------------------------------------------------------------------------
-def _add_document_rows(db: AsyncSession, golden: GoldenDocument, ingestion: IngestionService) -> Dict[str, int]:
+def _add_document_rows(db: AsyncSession, golden: GoldenDocument, ingestion: IngestionService) -> dict[str, int]:
     """Añade a la sesión el documento, la imagen y todos los chunks (mismo formato que la ingesta real)."""
     doc_id = golden_document_id(golden.filename)
     doc = Document(
@@ -264,7 +264,7 @@ def _add_document_rows(db: AsyncSession, golden: GoldenDocument, ingestion: Inge
     return {"chunks": chunks, "images": 1}
 
 
-async def _embed_leaf_chunks(db: AsyncSession, document_ids: List[uuid.UUID]) -> None:
+async def _embed_leaf_chunks(db: AsyncSession, document_ids: list[uuid.UUID]) -> None:
     """Vectoriza solo los chunks hoja (los padres con hijos quedan sin embedding, igual que en la ingesta)."""
     await db.flush()
     chunks = (
@@ -273,7 +273,7 @@ async def _embed_leaf_chunks(db: AsyncSession, document_ids: List[uuid.UUID]) ->
     parent_ids = {c.parent_id for c in chunks if c.parent_id is not None}
     leaves = [c for c in chunks if c.id not in parent_ids]
     vectors = await embedding_service.get_embeddings_batch([c.content for c in leaves])
-    for chunk, vector in zip(leaves, vectors):
+    for chunk, vector in zip(leaves, vectors, strict=False):
         chunk.embedding = vector
 
 
@@ -288,7 +288,7 @@ async def seed_golden_corpus(db: AsyncSession) -> SeedResult:
     )
 
     ingestion = IngestionService()
-    new_ids: List[uuid.UUID] = []
+    new_ids: list[uuid.UUID] = []
     for golden in GOLDEN_DOCUMENTS:
         if wanted[golden.filename] in existing:
             result.documents_skipped += 1
@@ -304,7 +304,7 @@ async def seed_golden_corpus(db: AsyncSession) -> SeedResult:
     return result
 
 
-async def seed_demo_corpus() -> Dict[str, Any]:
+async def seed_demo_corpus() -> dict[str, Any]:
     """Abre su propia sesión, siembra el corpus y confirma la transacción. Devuelve el resumen con la duración."""
     started = time.perf_counter()
     async with database.AsyncSessionLocal() as db:
@@ -326,7 +326,7 @@ async def seed_demo_corpus_if_empty() -> bool:
     return True
 
 
-async def get_demo_status(db: AsyncSession) -> Dict[str, Any]:
+async def get_demo_status(db: AsyncSession) -> dict[str, Any]:
     """Estado del demo: dialecto, si el corpus está sembrado, totales y configuración activa."""
     wanted = [golden_document_id(name) for name in GOLDEN_FILENAMES]
     seeded_count = (

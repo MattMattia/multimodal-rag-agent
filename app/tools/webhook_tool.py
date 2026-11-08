@@ -1,9 +1,10 @@
-from datetime import datetime, timezone
 import ipaddress
 import logging
 import socket
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlparse
+
 import httpx
 
 from app.core.config import settings
@@ -18,7 +19,7 @@ INTERNAL_HOSTNAMES = {"db", "api", "frontend", "langfuse", "localhost"}
 ALLOWED_WEBHOOK_PORTS = {None, 80, 443, 8000, 8080, 8443}
 
 
-def _is_forbidden_ip(ip: ipaddress._BaseAddress) -> bool:
+def _is_forbidden_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
     return (
@@ -54,13 +55,14 @@ def validate_webhook_url(url: str) -> str:
         raise ValueError(f"El puerto {port} no está permitido para webhooks (host fuera de ALLOWED_WEBHOOK_HOSTS).")
 
     try:
-        literal_ip: Optional[ipaddress._BaseAddress] = ipaddress.ip_address(host)
+        literal_ip: ipaddress.IPv4Address | ipaddress.IPv6Address | None = ipaddress.ip_address(host)
     except ValueError:
         literal_ip = None
 
     if literal_ip is None and (host in INTERNAL_HOSTNAMES or "." not in host):
         raise ValueError(f"Host interno no permitido: '{host}'.")
 
+    addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address]
     if literal_ip is not None:
         addresses = [literal_ip]
     else:
@@ -69,7 +71,7 @@ def validate_webhook_url(url: str) -> str:
         except socket.gaierror as exc:
             # Fail closed: an unresolvable host could resolve differently for the HTTP client.
             raise ValueError(f"No se pudo resolver el host '{host}'.") from exc
-        addresses = [ipaddress.ip_address(info[4][0].split("%")[0]) for info in infos]
+        addresses = [ipaddress.ip_address(str(info[4][0]).split("%")[0]) for info in infos]
 
     for ip in addresses:
         if _is_forbidden_ip(ip):
@@ -79,9 +81,9 @@ def validate_webhook_url(url: str) -> str:
 
 async def execute_dispatch_webhook(
     event_type: str,
-    payload: Dict[str, Any],
-    target_url: Optional[str] = None,
-) -> Dict[str, Any]:
+    payload: dict[str, Any],
+    target_url: str | None = None,
+) -> dict[str, Any]:
     """Envía un payload de notificación vía HTTP POST a un webhook externo (Slack, Jira, ERP).
 
     Args:
@@ -109,7 +111,7 @@ async def execute_dispatch_webhook(
 
     body = {
         "event_type": event_type,
-        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "data": payload,
         "source": "Sistema RAG Multimodal & Agente IA Autónomo",
     }

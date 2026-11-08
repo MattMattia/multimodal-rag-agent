@@ -1,5 +1,5 @@
-from unittest.mock import MagicMock
 import uuid
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -133,7 +133,7 @@ def test_telemetry_service_v2_client_integration():
     # 3. Registrar generación
     mock_gen = MagicMock()
     mock_trace.generation.return_value = mock_gen
-    gen = service.record_generation(
+    service.record_generation(
         parent=trace,
         name="gemini_turn_0",
         model="gemini-1.5-pro",
@@ -203,7 +203,7 @@ def test_telemetry_service_v4_client_integration():
     # 3. Registrar generación
     mock_gen = MagicMock()
     mock_obs.start_observation.return_value = mock_gen
-    gen = service.record_generation(
+    service.record_generation(
         parent=trace,
         name="gemini_turn_0",
         model="gemini-1.5-pro",

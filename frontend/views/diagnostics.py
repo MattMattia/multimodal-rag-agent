@@ -1,6 +1,6 @@
 """Latency X-ray: renders `SearchDiagnostics` as a per-stage bar chart."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -15,7 +15,7 @@ STAGES = (
 )
 
 
-def _as_float(value: Any) -> Optional[float]:
+def _as_float(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
     try:
@@ -24,7 +24,7 @@ def _as_float(value: Any) -> Optional[float]:
         return None
 
 
-def diagnostics_rows(diagnostics: Any) -> List[Dict[str, Any]]:
+def diagnostics_rows(diagnostics: Any) -> list[dict[str, Any]]:
     """Stage rows present in `diagnostics`; missing or non-numeric fields are skipped."""
     if not isinstance(diagnostics, dict):
         return []
@@ -36,7 +36,7 @@ def diagnostics_rows(diagnostics: Any) -> List[Dict[str, Any]]:
     return rows
 
 
-def last_diagnostics(executed_tools: Any) -> Optional[Dict[str, Any]]:
+def last_diagnostics(executed_tools: Any) -> dict[str, Any] | None:
     """Diagnostics of the last tool record that carries them (persisted `executed_tools`)."""
     if not isinstance(executed_tools, list):
         return None

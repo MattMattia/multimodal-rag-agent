@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from PIL import Image
 import pytest
+from PIL import Image
 
 from app.services.agent import AutonomousAgentService
 from app.services.reranker import RerankerService

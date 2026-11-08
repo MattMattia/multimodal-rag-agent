@@ -1,5 +1,6 @@
-from pathlib import Path
 import uuid
+from pathlib import Path
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -33,10 +34,7 @@ def test_generate_report_pdf():
     assert file_path.stat().st_size > 0
 
     # Limpieza del archivo de prueba
-    try:
-        file_path.unlink()
-    except Exception:
-        pass
+    file_path.unlink(missing_ok=True)
 
 
 @pytest.mark.asyncio

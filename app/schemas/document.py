@@ -1,6 +1,7 @@
-from datetime import datetime
-from typing import Any, Dict, List, Optional
 import uuid
+from datetime import datetime
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -11,11 +12,11 @@ class DocumentChunkResponse(BaseModel):
 
     id: uuid.UUID
     document_id: uuid.UUID
-    parent_id: Optional[uuid.UUID] = None
+    parent_id: uuid.UUID | None = None
     content: str
     chunk_type: str = Field(..., description="Tipo de chunk: 'text', 'table', 'image_description'")
-    page_number: Optional[int] = None
-    chunk_metadata: Dict[str, Any] = Field(default_factory=dict)
+    page_number: int | None = None
+    chunk_metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 
@@ -28,8 +29,8 @@ class DocumentImageResponse(BaseModel):
     document_id: uuid.UUID
     image_path: str
     description: str
-    page_number: Optional[int] = None
-    image_metadata: Dict[str, Any] = Field(default_factory=dict)
+    page_number: int | None = None
+    image_metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 
@@ -54,8 +55,8 @@ class DocumentResponse(BaseModel):
     file_path: str
     upload_date: datetime
     status: str
-    error_message: Optional[str] = None
-    doc_metadata: Dict[str, Any] = Field(default_factory=dict)
+    error_message: str | None = None
+    doc_metadata: dict[str, Any] = Field(default_factory=dict)
     total_chunks: int = 0
     total_images: int = 0
 
@@ -63,6 +64,6 @@ class DocumentResponse(BaseModel):
 class DocumentDetailResponse(DocumentResponse):
     """Esquema detallado que incluye lista de fragmentos e imágenes."""
 
-    chunks: List[DocumentChunkResponse] = Field(default_factory=list)
-    images: List[DocumentImageResponse] = Field(default_factory=list)
+    chunks: list[DocumentChunkResponse] = Field(default_factory=list)
+    images: list[DocumentImageResponse] = Field(default_factory=list)
 

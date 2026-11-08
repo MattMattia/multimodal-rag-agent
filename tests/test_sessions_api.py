@@ -1,9 +1,9 @@
 """Session lifecycle, export and feedback endpoints of the agent (R2-BUG-07)."""
 
-from datetime import datetime, timedelta, timezone
 import io
-from unittest.mock import MagicMock, patch
 import uuid
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 import pdfplumber
 import pytest
@@ -16,7 +16,7 @@ from app.core.telemetry import telemetry_service
 from app.main import app
 from app.models.chat import ChatMessage, ensure_chat_schema
 
-T0 = datetime(2030, 1, 1, tzinfo=timezone.utc)
+T0 = datetime(2030, 1, 1, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)

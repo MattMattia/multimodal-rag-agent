@@ -1,7 +1,10 @@
 import json
-from typing import List, Union
+import logging
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -56,7 +59,7 @@ class Settings(BaseSettings):
 
     # Seguridad
     API_KEY: str = ""  # si no está vacío, /api/v1 exige el header X-API-Key
-    ALLOWED_WEBHOOK_HOSTS: List[str] = []  # hosts a los que se permite webhooks http (no https)
+    ALLOWED_WEBHOOK_HOSTS: list[str] = []  # hosts a los que se permite webhooks http (no https)
     MAX_UPLOAD_SIZE_MB: float = 25
 
     # Búsqueda
@@ -70,18 +73,18 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 60
 
     # CORS
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000", "http://localhost:8501"]
+    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8000", "http://localhost:8501"]
     ALLOWED_ORIGIN_REGEX: str = ""  # regex opcional adicional (p. ej. previews de Vercel); vacío = desactivado
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
-    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
+    def assemble_cors_origins(cls, v: str | list[str]) -> list[str]:
         if isinstance(v, str):
             if v.startswith("[") and v.endswith("]"):
                 try:
                     return json.loads(v)
-                except Exception:
-                    pass
+                except ValueError:
+                    logger.warning("Valor de lista JSON inválido, se interpreta como CSV: %r", v)
             return [i.strip() for i in v.split(",") if i.strip()]
         elif isinstance(v, list):
             return v
@@ -89,13 +92,13 @@ class Settings(BaseSettings):
 
     @field_validator("ALLOWED_WEBHOOK_HOSTS", mode="before")
     @classmethod
-    def assemble_webhook_hosts(cls, v: Union[str, List[str]]) -> List[str]:
+    def assemble_webhook_hosts(cls, v: str | list[str]) -> list[str]:
         if isinstance(v, str):
             if v.startswith("[") and v.endswith("]"):
                 try:
                     return json.loads(v)
-                except Exception:
-                    pass
+                except ValueError:
+                    logger.warning("Valor de lista JSON inválido, se interpreta como CSV: %r", v)
             return [i.strip().lower() for i in v.split(",") if i.strip()]
         return v
 

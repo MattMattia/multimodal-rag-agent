@@ -1,6 +1,6 @@
 import logging
-from typing import Any, Dict, List, Optional
 import uuid
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,9 +15,9 @@ async def execute_search_knowledge_base(
     query: str,
     top_k: int = 5,
     mode: str = "hybrid",
-    filter_document_id: Optional[uuid.UUID] = None,
+    filter_document_id: uuid.UUID | None = None,
     rerank: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Ejecuta la búsqueda híbrida en el vector store y extrae contexto y citas para el Agente IA.
 
     Args:
@@ -44,8 +44,8 @@ async def execute_search_knowledge_base(
 
     response = await hybrid_search_service.search(db=db, request=request)
 
-    citations: List[Dict[str, Any]] = []
-    context_blocks: List[str] = []
+    citations: list[dict[str, Any]] = []
+    context_blocks: list[str] = []
 
     for idx, item in enumerate(response.results, start=1):
         # Guardar cita estructurada con trazabilidad de relevancia

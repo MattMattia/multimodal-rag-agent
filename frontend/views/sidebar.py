@@ -1,11 +1,10 @@
 """Sidebar: API health, sessions, hyperparameters, Golden Corpus, ingestion and document catalog."""
 
 import uuid
-from typing import Any, Dict, List, Optional
-
-import streamlit as st
+from typing import Any
 
 import api_client
+import streamlit as st
 
 SEARCH_MODES = ("hybrid", "dense", "sparse")
 ALL_DOCUMENTS = "__all__"
@@ -30,7 +29,7 @@ def _delete_current_session() -> None:
         st.session_state.flash = ("error", f"No se pudo eliminar la sesión: {res.get('error')}")
 
 
-def _session_label(session: Optional[Dict[str, Any]]) -> str:
+def _session_label(session: dict[str, Any] | None) -> str:
     if session is None:
         return "Nueva sesión (sin mensajes)"
     title = str(session.get("title") or "Sin título")
@@ -91,7 +90,7 @@ def render_sessions() -> None:
 
 
 # ---------------------------------------------------------------------------- hyperparameters
-def render_hyperparameters(documents: List[Dict[str, Any]]) -> api_client.ChatOptions:
+def render_hyperparameters(documents: list[dict[str, Any]]) -> api_client.ChatOptions:
     with st.expander("Hiperparámetros del agente", icon=":material/tune:"):
         mode = st.segmented_control(
             "Modo de búsqueda", SEARCH_MODES, default="hybrid", required=True, key="hp_search_mode"

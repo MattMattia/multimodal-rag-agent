@@ -6,7 +6,8 @@ bloque padre) contiene al menos una palabra clave esperada. Las métricas usan l
 
 import math
 import time
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +18,7 @@ from app.services.rag_search import HybridSearchService, hybrid_search_service
 
 MODES = ("dense", "sparse", "hybrid")
 
-GOLDEN_EVAL_QUERIES: List[Dict[str, Any]] = [
+GOLDEN_EVAL_QUERIES: list[dict[str, Any]] = [
     {
         "id": "q1",
         "category": "text",
@@ -83,7 +84,7 @@ def hit_rate_at_k(relevances: Sequence[int], k: int) -> float:
     return 1.0 if any(relevances[:k]) else 0.0
 
 
-def reciprocal_rank(relevances: Sequence[int], k: Optional[int] = None) -> float:
+def reciprocal_rank(relevances: Sequence[int], k: int | None = None) -> float:
     """1 / posición del primer resultado relevante (0.0 si no hay ninguno en la ventana)."""
     window = relevances if k is None else relevances[:k]
     for position, relevant in enumerate(window, start=1):
@@ -96,7 +97,7 @@ def _dcg(relevances: Sequence[int]) -> float:
     return sum(rel / math.log2(position + 1) for position, rel in enumerate(relevances, start=1))
 
 
-def ndcg_at_k(relevances: Sequence[int], k: int, total_relevant: Optional[int] = None) -> float:
+def ndcg_at_k(relevances: Sequence[int], k: int, total_relevant: int | None = None) -> float:
     """NDCG@k = DCG@k / IDCG@k, con DCG = suma de rel_i / log2(i + 1).
 
     IDCG supone min(k, total_relevant) resultados relevantes en las primeras posiciones, donde `total_relevant` es
@@ -116,7 +117,7 @@ def mean(values: Sequence[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
-def is_relevant(result: Dict[str, Any], expected_docs: Sequence[str], expected_keywords: Sequence[str]) -> bool:
+def is_relevant(result: dict[str, Any], expected_docs: Sequence[str], expected_keywords: Sequence[str]) -> bool:
     """Documento esperado y, si hay palabras clave, al menos una presente en el contenido o en el del padre."""
     if result.get("document_name") not in expected_docs:
         return False
@@ -129,15 +130,15 @@ def is_relevant(result: Dict[str, Any], expected_docs: Sequence[str], expected_k
 class RAGEvaluationService:
     """Ejecuta GOLDEN_EVAL_QUERIES en cada modalidad y agrega hit rate, MRR, NDCG y latencia."""
 
-    def __init__(self, search_service: Optional[HybridSearchService] = None, queries: Optional[List[Dict[str, Any]]] = None):
+    def __init__(self, search_service: HybridSearchService | None = None, queries: list[dict[str, Any]] | None = None):
         self.search_service = search_service or hybrid_search_service
         self.queries = queries if queries is not None else GOLDEN_EVAL_QUERIES
 
-    async def evaluate(self, db: AsyncSession, top_k: int = 5, modes: Sequence[str] = MODES) -> Dict[str, Any]:
+    async def evaluate(self, db: AsyncSession, top_k: int = 5, modes: Sequence[str] = MODES) -> dict[str, Any]:
         from app.services.demo_seeder import gemini_configured
 
         embedding_mode = "gemini" if gemini_configured() else "mock"
-        report: Dict[str, Any] = {
+        report: dict[str, Any] = {
             "top_k": top_k,
             "num_queries": len(self.queries),
             "embedding_mode": embedding_mode,
@@ -153,7 +154,7 @@ class RAGEvaluationService:
         for mode in modes:
             rows = [
                 await self._run_query(db, spec, mode, top_k, total)
-                for spec, total in zip(self.queries, totals)
+                for spec, total in zip(self.queries, totals, strict=False)
             ]
             report["modes"][mode] = {
                 "semantic": mode == "sparse" or embedding_mode == "gemini",
@@ -166,7 +167,7 @@ class RAGEvaluationService:
         return report
 
     @staticmethod
-    async def _count_relevant_blocks(db: AsyncSession, spec: Dict[str, Any]) -> int:
+    async def _count_relevant_blocks(db: AsyncSession, spec: dict[str, Any]) -> int:
         """Bloques (padre o chunk suelto) del corpus que cumplen la misma regla de relevancia que los resultados."""
         stmt = (
             select(DocumentChunk.id, DocumentChunk.parent_id, DocumentChunk.content, Document.filename)
@@ -184,8 +185,8 @@ class RAGEvaluationService:
         return len(blocks)
 
     async def _run_query(
-        self, db: AsyncSession, spec: Dict[str, Any], mode: str, top_k: int, total_relevant: Optional[int] = None
-    ) -> Dict[str, Any]:
+        self, db: AsyncSession, spec: dict[str, Any], mode: str, top_k: int, total_relevant: int | None = None
+    ) -> dict[str, Any]:
         # La modalidad híbrida incluye RRF + reranker; dense y sparse se miden "puras".
         request = SearchRequest(query=spec["query"], top_k=top_k, mode=mode, rerank=(mode == "hybrid"), include_parent=True)
         started = time.perf_counter()

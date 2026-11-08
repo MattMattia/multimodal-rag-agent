@@ -1,8 +1,7 @@
 import uuid
 
-import streamlit as st
-
 import api_client
+import streamlit as st
 from views import benchmark, chat, sidebar
 
 # ==============================================================================

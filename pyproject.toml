@@ -18,9 +18,12 @@ select = [
 ]
 ignore = [
     "B008", # FastAPI dependencies are declared as call defaults (Depends, File, Query)
+    "E501", # line length is a formatter concern; long Spanish prompts/docstrings are intentional
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"tests/test_agent.py" = ["E402"]  # phase sections appended mid-file, each with its own imports
+"tests/test_search.py" = ["E402"]  # same: per-phase import blocks
 "tests/**" = [
     "S101", # assert is the pytest idiom
     "S105", # hard-coded test credentials

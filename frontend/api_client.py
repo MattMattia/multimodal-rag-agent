@@ -6,8 +6,9 @@ views can render a friendly message instead of a traceback.
 
 import json
 import os
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
 import httpx
 import streamlit as st
@@ -33,20 +34,20 @@ class ChatOptions:
     search_mode: str = "hybrid"
     top_k: int = 5
     enable_rerank: bool = True
-    temperature: Optional[float] = None
-    max_turns: Optional[int] = None
-    filter_document_id: Optional[str] = None
+    temperature: float | None = None
+    max_turns: int | None = None
+    filter_document_id: str | None = None
 
-    def to_payload(self) -> Dict[str, Any]:
+    def to_payload(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def build_chat_payload(message: str, session_id: str, options: ChatOptions) -> Dict[str, Any]:
+def build_chat_payload(message: str, session_id: str, options: ChatOptions) -> dict[str, Any]:
     """Request body for `/agent/chat` and `/agent/chat/stream`."""
     return {"message": message, "session_id": session_id, **options.to_payload()}
 
 
-def _result(success: bool, data: Any = None, error: Optional[str] = None, status_code: Optional[int] = None):
+def _result(success: bool, data: Any = None, error: str | None = None, status_code: int | None = None):
     return {"success": success, "data": data, "error": error, "status_code": status_code}
 
 
@@ -60,7 +61,7 @@ def _error_text(resp: httpx.Response) -> str:
     return resp.text[:ERROR_PREVIEW_CHARS] or f"HTTP {resp.status_code}"
 
 
-def _call(method: str, path: str, *, timeout: float = SHORT_TIMEOUT, raw: bool = False, **kwargs) -> Dict[str, Any]:
+def _call(method: str, path: str, *, timeout: float = SHORT_TIMEOUT, raw: bool = False, **kwargs) -> dict[str, Any]:
     """Performs one request against the API; `raw=True` returns the body bytes instead of JSON."""
     try:
         resp = httpx.request(method, f"{API_URL}{path}", headers=API_HEADERS, timeout=timeout, **kwargs)
@@ -79,44 +80,44 @@ def _call(method: str, path: str, *, timeout: float = SHORT_TIMEOUT, raw: bool =
 
 
 # ---------------------------------------------------------------------------- health / documents
-def check_api_health() -> Dict[str, Any]:
+def check_api_health() -> dict[str, Any]:
     res = _call("GET", "/health", timeout=3.0)
     return res["data"] if res["success"] and isinstance(res["data"], dict) else {"status": "error"}
 
 
-def fetch_documents() -> List[Dict[str, Any]]:
+def fetch_documents() -> list[dict[str, Any]]:
     res = _call("GET", f"{API_PREFIX}/documents")
     return res["data"] if res["success"] and isinstance(res["data"], list) else []
 
 
-def upload_document_api(file_bytes: bytes, filename: str) -> Dict[str, Any]:
+def upload_document_api(file_bytes: bytes, filename: str) -> dict[str, Any]:
     return _call(
         "POST", f"{API_PREFIX}/documents/upload", timeout=UPLOAD_TIMEOUT, files={"file": (filename, file_bytes)}
     )
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_file_bytes(relative_url: str) -> Optional[bytes]:
+def fetch_file_bytes(relative_url: str) -> bytes | None:
     """Downloads a static file served by the API (authenticated with `API_HEADERS`)."""
     res = _call("GET", "/" + relative_url.lstrip("/"), timeout=FILE_TIMEOUT, raw=True)
     return res["data"] if res["success"] else None
 
 
 # ---------------------------------------------------------------------------- sessions
-def list_sessions() -> Optional[List[Dict[str, Any]]]:
+def list_sessions() -> list[dict[str, Any]] | None:
     """`SessionSummary` list ordered by `updated_at DESC`; `None` when the endpoint is unavailable."""
     res = _call("GET", f"{API_PREFIX}/agent/sessions")
     return res["data"] if res["success"] and isinstance(res["data"], list) else None
 
 
-def fetch_session_history(session_id: str) -> List[Dict[str, Any]]:
+def fetch_session_history(session_id: str) -> list[dict[str, Any]]:
     res = _call("GET", f"{API_PREFIX}/agent/sessions/{session_id}/history")
     if res["success"] and isinstance(res["data"], dict):
         return res["data"].get("messages", [])
     return []
 
 
-def delete_session(session_id: str) -> Dict[str, Any]:
+def delete_session(session_id: str) -> dict[str, Any]:
     return _call("DELETE", f"{API_PREFIX}/agent/sessions/{session_id}")
 
 
@@ -132,13 +133,13 @@ def export_session(session_id: str, export_format: str) -> bytes:
     return res["data"] if res["success"] else b""
 
 
-def submit_feedback(session_id: str, message_id: str, rating: int, comment: Optional[str] = None) -> Dict[str, Any]:
+def submit_feedback(session_id: str, message_id: str, rating: int, comment: str | None = None) -> dict[str, Any]:
     payload = {"session_id": session_id, "message_id": message_id, "rating": rating, "comment": comment}
     return _call("POST", f"{API_PREFIX}/agent/feedback", json=payload)
 
 
 # ---------------------------------------------------------------------------- search / agent
-def search_knowledge_base(query: str, options: ChatOptions) -> Dict[str, Any]:
+def search_knowledge_base(query: str, options: ChatOptions) -> dict[str, Any]:
     payload = {
         "query": query,
         "top_k": options.top_k,
@@ -150,11 +151,11 @@ def search_knowledge_base(query: str, options: ChatOptions) -> Dict[str, Any]:
 
 
 def stream_chat_response(
-    message: str, session_id: str, options: ChatOptions, metadata_container: Dict[str, Any]
+    message: str, session_id: str, options: ChatOptions, metadata_container: dict[str, Any]
 ) -> Iterator[str]:
     """Consumes the SSE stream, yielding tokens; `tool_end` and `metadata` events land in `metadata_container`."""
     payload = build_chat_payload(message, session_id, options)
-    tool_events: List[Dict[str, Any]] = metadata_container.setdefault("tool_events", [])
+    tool_events: list[dict[str, Any]] = metadata_container.setdefault("tool_events", [])
     try:
         with httpx.stream(
             "POST",
@@ -184,7 +185,7 @@ def stream_chat_response(
         yield f"\n\n⚠️ Error de conexión durante la transmisión en streaming: {exc}"
 
 
-def _parse_sse_line(line: str) -> Optional[Dict[str, Any]]:
+def _parse_sse_line(line: str) -> dict[str, Any] | None:
     line = line.strip()
     if not line.startswith("data: "):
         return None
@@ -199,13 +200,13 @@ def _parse_sse_line(line: str) -> Optional[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------- demo / evaluation
-def demo_status() -> Dict[str, Any]:
+def demo_status() -> dict[str, Any]:
     return _call("GET", f"{API_PREFIX}/demo/status")
 
 
-def seed_demo() -> Dict[str, Any]:
+def seed_demo() -> dict[str, Any]:
     return _call("POST", f"{API_PREFIX}/demo/seed", timeout=UPLOAD_TIMEOUT)
 
 
-def evaluate_retrieval(top_k: int) -> Dict[str, Any]:
+def evaluate_retrieval(top_k: int) -> dict[str, Any]:
     return _call("POST", f"{API_PREFIX}/demo/evaluate", timeout=EVALUATE_TIMEOUT, json={"top_k": top_k})

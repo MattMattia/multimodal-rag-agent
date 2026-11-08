@@ -1,13 +1,12 @@
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
-
-from pgvector.sqlalchemy import Vector
 
 from app.core.config import settings
 from app.core.database import Base
@@ -28,19 +27,19 @@ class Document(Base):
     status: Mapped[str] = mapped_column(
         String(50), default="pending", nullable=False, index=True
     )  # 'pending', 'processing', 'completed', 'failed'
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    doc_metadata: Mapped[Dict[str, Any]] = mapped_column(
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    doc_metadata: Mapped[dict[str, Any]] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"), default=dict, nullable=False
     )
 
     # Relaciones
-    chunks: Mapped[List["DocumentChunk"]] = relationship(
+    chunks: Mapped[list["DocumentChunk"]] = relationship(
         "DocumentChunk",
         back_populates="document",
         cascade="all, delete-orphan",
         order_by="DocumentChunk.created_at",
     )
-    images: Mapped[List["DocumentImage"]] = relationship(
+    images: Mapped[list["DocumentImage"]] = relationship(
         "DocumentImage",
         back_populates="document",
         cascade="all, delete-orphan",
@@ -57,19 +56,19 @@ class DocumentChunk(Base):
     document_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    parent_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("document_chunks.id", ondelete="CASCADE"), nullable=True, index=True
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     chunk_type: Mapped[str] = mapped_column(
         String(50), default="text", nullable=False, index=True
     )  # 'text', 'table', 'image_description'
-    page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # vector(N) nativo (con índice HNSW) en PostgreSQL; array JSON de floats en SQLite
-    embedding: Mapped[Optional[List[float]]] = mapped_column(
+    embedding: Mapped[list[float] | None] = mapped_column(
         JSON(none_as_null=True).with_variant(Vector(settings.EMBEDDING_DIMENSION), "postgresql"), nullable=True
     )
-    chunk_metadata: Mapped[Dict[str, Any]] = mapped_column(
+    chunk_metadata: Mapped[dict[str, Any]] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"), default=dict, nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -81,7 +80,7 @@ class DocumentChunk(Base):
     parent: Mapped[Optional["DocumentChunk"]] = relationship(
         "DocumentChunk", remote_side=[id], back_populates="children"
     )
-    children: Mapped[List["DocumentChunk"]] = relationship(
+    children: Mapped[list["DocumentChunk"]] = relationship(
         "DocumentChunk", back_populates="parent", cascade="all, delete-orphan"
     )
 
@@ -97,8 +96,8 @@ class DocumentImage(Base):
     )
     image_path: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    image_metadata: Mapped[Dict[str, Any]] = mapped_column(
+    page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    image_metadata: Mapped[dict[str, Any]] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"), default=dict, nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(

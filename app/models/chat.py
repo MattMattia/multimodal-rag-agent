@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -19,14 +19,14 @@ class ChatMessage(Base):
     session_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # 'user', 'assistant', 'tool'
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    citations: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
+    citations: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"), default=list, nullable=True
     )
-    executed_tools: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
+    executed_tools: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"), default=list, nullable=True
     )
     # Metadatos libres del mensaje (p. ej. feedback del usuario: {"feedback": {"rating": 1, "comment": ...}})
-    message_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+    message_metadata: Mapped[dict[str, Any] | None] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"), default=dict, nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(

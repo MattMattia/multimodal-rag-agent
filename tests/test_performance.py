@@ -6,7 +6,7 @@ import threading
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, List
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,6 +23,7 @@ from app.services.ingestion import IngestionService
 from app.services.rag_search import HybridSearchService
 from app.services.vision import VisionService
 
+
 @pytest.fixture
 def no_langfuse():
     """Keep telemetry inert so unit tests never reach the Langfuse server."""
@@ -35,7 +36,7 @@ def no_langfuse():
 # ---------------------------------------------------------------------------
 # PERF-01: blocking work runs off the event loop
 # ---------------------------------------------------------------------------
-def _thread_recording_pdf(threads: List[int]):
+def _thread_recording_pdf(threads: list[int]):
     def fake_pdf(title, summary, key_points=None, sections=None):
         threads.append(threading.get_ident())
         return {"status": "success", "download_url": "/uploads/reports/x.pdf", "file_path": "x.pdf", "filename": "x.pdf"}
@@ -44,7 +45,7 @@ def _thread_recording_pdf(threads: List[int]):
 
 
 async def test_dispatch_tool_call_generates_pdf_in_a_worker_thread():
-    threads: List[int] = []
+    threads: list[int] = []
     service = AutonomousAgentService()
     with patch("app.services.agent.execute_generate_report_pdf", _thread_recording_pdf(threads)):
         result, citations = await service._dispatch_tool_call(
@@ -59,7 +60,7 @@ async def test_dispatch_tool_call_generates_pdf_in_a_worker_thread():
 
 
 async def test_fallback_turn_generates_pdf_in_a_worker_thread(no_langfuse):
-    threads: List[int] = []
+    threads: list[int] = []
     service = AutonomousAgentService()
     with patch("app.services.agent.execute_generate_report_pdf", _thread_recording_pdf(threads)):
         response = await service._execute_fallback_turn(
@@ -111,11 +112,11 @@ class _FakeSession:
 
     def __init__(self, doc):
         self.doc = doc
-        self.added: List[Any] = []
+        self.added: list[Any] = []
         self.flushes = 0
         self.commits = 0
         self.rollbacks = 0
-        self.events: List[str] = []
+        self.events: list[str] = []
 
     def add(self, obj):
         self.added.append(obj)
@@ -161,7 +162,7 @@ async def test_pdf_ingestion_runs_pdfplumber_in_thread_with_one_flush_and_one_fi
         doc_metadata={},
     )
     session = _FakeSession(doc)
-    open_threads: List[int] = []
+    open_threads: list[int] = []
     long_text = "Frase de prueba para dividir en varios fragmentos. " * 60
 
     def fake_open(path):
@@ -173,7 +174,7 @@ async def test_pdf_ingestion_runs_pdfplumber_in_thread_with_one_flush_and_one_fi
     monkeypatch.setattr(ingestion_module.pdfplumber, "open", fake_open)
     describe = AsyncMock(return_value="descripcion")
     monkeypatch.setattr(ingestion_module.vision_service, "describe_image", describe)
-    embed_threads: List[int] = []
+    embed_threads: list[int] = []
 
     async def fake_embed(texts, batch_size=50):
         session.events.append("embed")
@@ -272,7 +273,7 @@ async def test_describe_image_releases_the_file_handle(tmp_path):
 
 async def test_describe_image_caches_working_model(tmp_path):
     image_path = _png(tmp_path / "pic.png")
-    calls: List[str] = []
+    calls: list[str] = []
 
     async def fake_generate(model, contents):
         calls.append(model)
@@ -304,7 +305,7 @@ def test_vision_module_no_longer_depends_on_legacy_sdk():
 # PERF-03: GIN/HNSW DDL and websearch_to_tsquery
 # ---------------------------------------------------------------------------
 async def test_init_db_issues_english_gin_and_tuned_hnsw_indexes():
-    statements: List[str] = []
+    statements: list[str] = []
     conn = MagicMock()
 
     async def fake_execute(stmt, *args, **kwargs):
@@ -384,7 +385,7 @@ async def test_hybrid_search_returns_one_result_per_parent_block():
         _candidate(child_b, parent),
         _candidate(other),
     ]
-    seen_by_reranker: List[Any] = []
+    seen_by_reranker: list[Any] = []
 
     async def fake_rerank(query, candidates, top_n):
         seen_by_reranker.extend(candidates)
@@ -455,7 +456,7 @@ async def test_get_db_does_not_close_session_redundantly():
         session.rollback.assert_awaited_once()
 
 
-def _history(n: int) -> List[ChatMessage]:
+def _history(n: int) -> list[ChatMessage]:
     return [
         ChatMessage(
             session_id=uuid.uuid4(),
@@ -468,7 +469,7 @@ def _history(n: int) -> List[ChatMessage]:
     ]
 
 
-def _service_capturing_contents(captured: List[List[Any]]) -> AutonomousAgentService:
+def _service_capturing_contents(captured: list[list[Any]]) -> AutonomousAgentService:
     service = AutonomousAgentService()
     service._client = object()
     service._ensure_client = lambda: True  # type: ignore[method-assign]
@@ -481,11 +482,11 @@ def _service_capturing_contents(captured: List[List[Any]]) -> AutonomousAgentSer
     return service
 
 
-def _texts(contents) -> List[str]:
+def _texts(contents) -> list[str]:
     return [c.parts[0].text for c in contents]
 
 
-def _fake_db_with_history(history: List[ChatMessage]) -> MagicMock:
+def _fake_db_with_history(history: list[ChatMessage]) -> MagicMock:
     db = MagicMock()
     result = MagicMock()
     result.scalars.return_value.all.return_value = history
@@ -496,7 +497,7 @@ def _fake_db_with_history(history: List[ChatMessage]) -> MagicMock:
 
 
 async def test_sync_turn_sends_only_last_20_prior_messages_to_gemini(no_langfuse):
-    captured: List[List[Any]] = []
+    captured: list[list[Any]] = []
     service = _service_capturing_contents(captured)
     history = _history(30)
 
@@ -508,7 +509,7 @@ async def test_sync_turn_sends_only_last_20_prior_messages_to_gemini(no_langfuse
 
 
 async def test_execute_turn_loads_full_history_but_sends_last_20(no_langfuse):
-    captured: List[List[Any]] = []
+    captured: list[list[Any]] = []
     service = _service_capturing_contents(captured)
     history = _history(30)
     db = _fake_db_with_history(history)
@@ -522,7 +523,7 @@ async def test_execute_turn_loads_full_history_but_sends_last_20(no_langfuse):
 
 
 async def test_stream_turn_sends_only_last_20_prior_messages_to_gemini(no_langfuse):
-    captured: List[List[Any]] = []
+    captured: list[list[Any]] = []
     service = _service_capturing_contents(captured)
     db = _fake_db_with_history(_history(30))
 

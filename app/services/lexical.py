@@ -3,7 +3,7 @@
 import math
 import re
 import unicodedata
-from typing import List, Sequence
+from collections.abc import Sequence
 
 BM25_K1 = 1.5
 BM25_B = 0.75
@@ -40,7 +40,7 @@ def _stem(word: str) -> str:
     return word
 
 
-def tokenize(text: str) -> List[str]:
+def tokenize(text: str) -> list[str]:
     """Minúsculas, sin acentos, sin stopwords (es/en) y con stemming ligero."""
     if not text:
         return []
@@ -48,7 +48,7 @@ def tokenize(text: str) -> List[str]:
     return [_stem(tok) for tok in _TOKEN_RE.findall(folded) if tok not in STOPWORDS]
 
 
-def bm25_scores(query_tokens: Sequence[str], documents: Sequence[Sequence[str]]) -> List[float]:
+def bm25_scores(query_tokens: Sequence[str], documents: Sequence[Sequence[str]]) -> list[float]:
     """Puntuación Okapi BM25 de cada documento (lista de tokens) frente a la consulta."""
     n_docs = len(documents)
     if n_docs == 0 or not query_tokens:
@@ -57,7 +57,7 @@ def bm25_scores(query_tokens: Sequence[str], documents: Sequence[Sequence[str]])
     avg_len = sum(len(d) for d in documents) / n_docs or 1.0
     doc_freq = {t: sum(1 for d in documents if t in d) for t in set(query_tokens)}
 
-    scores: List[float] = []
+    scores: list[float] = []
     for doc in documents:
         score = 0.0
         length = len(doc)

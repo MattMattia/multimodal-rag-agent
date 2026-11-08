@@ -1,4 +1,4 @@
-from typing import Dict, List, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ class DemoStatusResponse(BaseModel):
     total_images: int
     gemini_configured: bool
     langfuse_enabled: bool
-    active_models: Dict[str, str]
+    active_models: dict[str, str]
     embedding_mode: Literal["gemini", "mock"] = Field(..., description="'mock' = vectores determinísticos sin API key")
 
 
@@ -41,8 +41,8 @@ class QueryEvaluation(BaseModel):
     reciprocal_rank: float
     ndcg: float
     latency_ms: float
-    relevances: List[int]
-    top_documents: List[str]
+    relevances: list[int]
+    top_documents: list[str]
 
 
 class ModeEvaluation(BaseModel):
@@ -51,12 +51,12 @@ class ModeEvaluation(BaseModel):
     mrr: float = Field(..., ge=0.0, le=1.0)
     ndcg_at_k: float = Field(..., ge=0.0, le=1.0)
     avg_latency_ms: float = Field(..., ge=0.0)
-    per_query: List[QueryEvaluation]
+    per_query: list[QueryEvaluation]
 
 
 class EvaluationResponse(BaseModel):
     top_k: int
     num_queries: int
     embedding_mode: Literal["gemini", "mock"]
-    warnings: List[str] = Field(default_factory=list)
-    modes: Dict[str, ModeEvaluation]
+    warnings: list[str] = Field(default_factory=list)
+    modes: dict[str, ModeEvaluation]

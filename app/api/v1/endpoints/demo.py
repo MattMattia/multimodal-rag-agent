@@ -1,6 +1,5 @@
 import logging
 import time
-from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +32,7 @@ async def seed_demo(db: AsyncSession = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error_detail("Error interno sembrando el Golden Corpus", e),
-        )
+        ) from e
     return DemoSeedResponse(
         documents_created=result.documents_created,
         documents_skipped=result.documents_skipped,
@@ -56,7 +55,7 @@ async def demo_status(db: AsyncSession = Depends(get_db)):
     summary="Evaluación científica RAG: dense vs sparse vs hybrid (hit rate, MRR, NDCG, latencia)",
 )
 async def evaluate_retrieval(
-    request: Optional[EvaluateRequest] = Body(default=None),
+    request: EvaluateRequest | None = Body(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """Ejecuta las 8 consultas doradas en cada modalidad y devuelve métricas agregadas y por consulta."""
@@ -73,4 +72,4 @@ async def evaluate_retrieval(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error_detail("Error interno durante la evaluación", e),
-        )
+        ) from e

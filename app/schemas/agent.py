@@ -1,7 +1,8 @@
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
-import uuid
+from typing import Any, Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.search import SearchDiagnostics
@@ -13,20 +14,20 @@ class CitationItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     document_name: str
-    page_number: Optional[int] = None
+    page_number: int | None = None
     chunk_type: str = Field(..., description="'text', 'table' o 'image_description'")
-    chunk_id: Optional[uuid.UUID] = None
-    rerank_score: Optional[float] = Field(None, description="Puntaje de relevancia del Reranker Semántico")
+    chunk_id: uuid.UUID | None = None
+    rerank_score: float | None = Field(None, description="Puntaje de relevancia del Reranker Semántico")
 
 
 class ToolExecutionRecord(BaseModel):
     """Registro de una herramienta invocada por el agente autónomo."""
 
     tool_name: str
-    tool_input: Dict[str, Any] = Field(default_factory=dict)
+    tool_input: dict[str, Any] = Field(default_factory=dict)
     tool_output: Any = None
-    duration_ms: Optional[float] = Field(default=None, description="Duración de la herramienta en milisegundos")
-    diagnostics: Optional[SearchDiagnostics] = Field(
+    duration_ms: float | None = Field(default=None, description="Duración de la herramienta en milisegundos")
+    diagnostics: SearchDiagnostics | None = Field(
         default=None, description="Rayos X de latencia cuando la herramienta fue una búsqueda RAG"
     )
 
@@ -39,11 +40,11 @@ class AgentChatRequest(BaseModel):
         min_length=1,
         description="Pregunta, consulta sobre documentos o instrucción de acción para el agente",
     )
-    session_id: Optional[uuid.UUID] = Field(
+    session_id: uuid.UUID | None = Field(
         default=None,
         description="Identificador único de la sesión de chat (opcional, se autogenera si no se envía)",
     )
-    filter_document_id: Optional[uuid.UUID] = Field(
+    filter_document_id: uuid.UUID | None = Field(
         default=None, description="Restringe las búsquedas RAG del agente a un documento (opcional)"
     )
     search_mode: Literal["hybrid", "dense", "sparse"] = Field(
@@ -51,10 +52,10 @@ class AgentChatRequest(BaseModel):
     )
     top_k: int = Field(5, ge=1, le=50, description="Fragmentos a recuperar por búsqueda RAG")
     enable_rerank: bool = Field(True, description="Aplica reranking semántico tras la fusión RRF")
-    temperature: Optional[float] = Field(
+    temperature: float | None = Field(
         default=None, ge=0.0, le=2.0, description="Temperatura del LLM (por defecto AGENT_TEMPERATURE)"
     )
-    max_turns: Optional[int] = Field(
+    max_turns: int | None = Field(
         default=None, ge=1, le=10, description="Máximo de iteraciones ReAct (por defecto AGENT_MAX_TURNS)"
     )
 
@@ -86,31 +87,31 @@ class AgentChatRequest(BaseModel):
 class AgentOptions:
     """Parámetros por solicitud del agente; `None` significa "usar el valor por defecto de Settings/código"."""
 
-    filter_document_id: Optional[uuid.UUID] = None
+    filter_document_id: uuid.UUID | None = None
     search_mode: str = "hybrid"
-    top_k: Optional[int] = None
+    top_k: int | None = None
     enable_rerank: bool = True
-    temperature: Optional[float] = None
-    max_turns: Optional[int] = None
+    temperature: float | None = None
+    max_turns: int | None = None
 
 
 class AgentChatResponse(BaseModel):
     """Respuesta generada por el Agente IA con trazabilidad de herramientas y citas."""
 
     response: str = Field(..., description="Respuesta final del agente con citas integradas")
-    citations: List[CitationItem] = Field(
+    citations: list[CitationItem] = Field(
         default_factory=list,
         description="Lista estructurada de documentos y páginas citadas",
     )
-    executed_tools: List[ToolExecutionRecord] = Field(
+    executed_tools: list[ToolExecutionRecord] = Field(
         default_factory=list,
         description="Lista cronológica de herramientas ejecutadas durante el turno",
     )
     session_id: uuid.UUID = Field(..., description="ID de sesión para seguimiento de conversación")
-    diagnostics: Optional[SearchDiagnostics] = Field(
+    diagnostics: SearchDiagnostics | None = Field(
         default=None, description="Rayos X de la última búsqueda RAG del turno (si hubo alguna)"
     )
-    duration_ms: Optional[float] = Field(default=None, description="Duración total del turno en milisegundos")
+    duration_ms: float | None = Field(default=None, description="Duración total del turno en milisegundos")
 
 
 class ChatMessageResponse(BaseModel):
@@ -120,8 +121,8 @@ class ChatMessageResponse(BaseModel):
     session_id: uuid.UUID
     role: str
     content: str
-    citations: Optional[List[Dict[str, Any]]] = None
-    executed_tools: Optional[List[Dict[str, Any]]] = None
+    citations: list[dict[str, Any]] | None = None
+    executed_tools: list[dict[str, Any]] | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -132,7 +133,7 @@ class ChatHistoryResponse(BaseModel):
 
     session_id: uuid.UUID
     total_messages: int
-    messages: List[ChatMessageResponse]
+    messages: list[ChatMessageResponse]
 
 
 
@@ -152,7 +153,7 @@ class FeedbackRequest(BaseModel):
     session_id: uuid.UUID
     message_id: uuid.UUID
     rating: Literal[1, -1] = Field(..., description="1 = útil, -1 = no útil")
-    comment: Optional[str] = Field(default=None, max_length=2000)
+    comment: str | None = Field(default=None, max_length=2000)
 
 
 class FeedbackResponse(BaseModel):

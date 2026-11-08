@@ -1,13 +1,12 @@
 import secrets
 from pathlib import Path
-from typing import Optional, Union
 
 from fastapi import Header, HTTPException, status
 
 from app.core.config import settings
 
 
-async def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
+async def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     """Exige el header X-API-Key cuando settings.API_KEY está configurada (vacía = acceso abierto)."""
     expected = settings.API_KEY
     if not expected:
@@ -26,7 +25,7 @@ def error_detail(public_message: str, exc: Exception) -> str:
     return public_message
 
 
-def resolve_within(base: Union[str, Path], candidate: Union[str, Path]) -> Optional[Path]:
+def resolve_within(base: str | Path, candidate: str | Path) -> Path | None:
     """Resuelve `candidate` (ruta completa, relativa al cwd) y la devuelve solo si es un archivo existente contenido en `base`.
 
     Única barrera de contención de rutas para todos los endpoints que sirven archivos

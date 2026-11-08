@@ -9,7 +9,7 @@ import json
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -43,7 +43,7 @@ DEMO_STATUS = {
 MOCK_WARNING = "Embeddings simulados: las métricas densas no son semánticas."
 
 
-def _mode(hit: float, mrr: float, ndcg: float, latency: float, semantic: bool = False) -> Dict[str, Any]:
+def _mode(hit: float, mrr: float, ndcg: float, latency: float, semantic: bool = False) -> dict[str, Any]:
     return {
         "semantic": semantic,
         "hit_rate_at_k": hit,
@@ -80,7 +80,7 @@ EVALUATION = {
 
 
 class FakeStream:
-    def __init__(self, lines: List[str], status_code: int = 200):
+    def __init__(self, lines: list[str], status_code: int = 200):
         self.status_code = status_code
         self._lines = lines
 
@@ -97,7 +97,7 @@ class FakeStream:
         return b""
 
 
-def sse(event: Dict[str, Any]) -> str:
+def sse(event: dict[str, Any]) -> str:
     return f"data: {json.dumps(event)}"
 
 
@@ -105,10 +105,10 @@ class FakeApi:
     """Routes `(METHOD, path)` to canned responses and records every call."""
 
     def __init__(self):
-        self.calls: List[Tuple[str, str, Dict[str, Any]]] = []
-        self.stream_calls: List[Dict[str, Any]] = []
-        self.stream_lines: List[str] = [sse({"type": "token", "content": "Hola"}), sse({"type": "metadata"})]
-        self.routes: Dict[Tuple[str, str], Tuple[int, Any]] = {
+        self.calls: list[tuple[str, str, dict[str, Any]]] = []
+        self.stream_calls: list[dict[str, Any]] = []
+        self.stream_lines: list[str] = [sse({"type": "token", "content": "Hola"}), sse({"type": "metadata"})]
+        self.routes: dict[tuple[str, str], tuple[int, Any]] = {
             ("GET", "/health"): (200, {"status": "ok", "environment": "test"}),
             ("GET", "/api/v1/documents"): (
                 200,
@@ -164,18 +164,18 @@ def fake_api(monkeypatch) -> FakeApi:
     return api
 
 
-def run_app(session_id: Optional[str] = None) -> AppTest:
+def run_app(session_id: str | None = None) -> AppTest:
     at = AppTest.from_file(APP_PATH, default_timeout=APP_TIMEOUT)
     if session_id:
         at.session_state["session_id"] = session_id
     return at.run()
 
 
-def history(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+def history(messages: list[dict[str, Any]]) -> dict[str, Any]:
     return {"session_id": SESSION_ID, "total_messages": len(messages), "messages": messages}
 
 
-def assistant_message(**extra) -> Dict[str, Any]:
+def assistant_message(**extra) -> dict[str, Any]:
     return {
         "id": MESSAGE_ID,
         "session_id": SESSION_ID,

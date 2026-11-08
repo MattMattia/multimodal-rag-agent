@@ -1,7 +1,7 @@
-from typing import Any, Dict, List, Literal, Optional
 import uuid
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any, Literal
 
+from pydantic import BaseModel, ConfigDict, Field
 
 SearchMode = Literal["hybrid", "dense", "sparse"]
 
@@ -11,7 +11,7 @@ class SearchRequest(BaseModel):
 
     query: str = Field(..., min_length=1, description="Texto o consulta a buscar en los documentos")
     top_k: int = Field(5, ge=1, le=50, description="Cantidad máxima de fragmentos a recuperar")
-    filter_document_id: Optional[uuid.UUID] = Field(
+    filter_document_id: uuid.UUID | None = Field(
         default=None,
         description="Filtrar la búsqueda a un documento específico (opcional, dejar en null o no enviar para buscar en todos)",
     )
@@ -51,14 +51,14 @@ class SearchResultItem(BaseModel):
     document_id: uuid.UUID
     document_name: str
     content: str
-    parent_id: Optional[uuid.UUID] = None
-    parent_content: Optional[str] = None
+    parent_id: uuid.UUID | None = None
+    parent_content: str | None = None
     chunk_type: str = Field(..., description="'text', 'table' o 'image_description'")
-    page_number: Optional[int] = None
+    page_number: int | None = None
     score: float = Field(..., description="Puntaje de relevancia unificado (RRF o similitud)")
-    rerank_score: Optional[float] = Field(None, description="Puntaje de relevancia refinado por el Reranker Semántico (0.0 - 1.0)")
+    rerank_score: float | None = Field(None, description="Puntaje de relevancia refinado por el Reranker Semántico (0.0 - 1.0)")
     rank: int = Field(..., description="Posición en el orden de relevancia (iniciando en 1)")
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class SearchDiagnostics(BaseModel):
@@ -81,7 +81,7 @@ class SearchResponse(BaseModel):
     query: str
     mode: str
     total_results: int
-    results: List[SearchResultItem]
-    diagnostics: Optional[SearchDiagnostics] = Field(
+    results: list[SearchResultItem]
+    diagnostics: SearchDiagnostics | None = Field(
         default=None, description="Latencia por etapa (rayos X) de esta búsqueda"
     )

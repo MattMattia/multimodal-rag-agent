@@ -1,8 +1,8 @@
 """Endpoints autenticados para servir archivos: reportes PDF, documentos originales e imágenes extraídas."""
 
-from pathlib import Path
-from typing import Iterable, Optional
 import uuid
+from collections.abc import Iterable
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
@@ -55,7 +55,7 @@ def _stored_file_response(
         resolved = resolve_within(base, stored_path)
         if resolved is None:
             continue
-        mime: Optional[str] = mime_types.get(resolved.suffix.lower())
+        mime: str | None = mime_types.get(resolved.suffix.lower())
         if mime is None:
             break
         return FileResponse(resolved, media_type=mime)

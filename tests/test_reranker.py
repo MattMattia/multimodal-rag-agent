@@ -1,9 +1,10 @@
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
-from app.services.reranker import RerankerService
 from app.core.telemetry import telemetry_service
+from app.services.reranker import RerankerService
 
 
 @pytest.fixture(autouse=True)

@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends
 
-from app.core.security import require_api_key
-
 from app.api.v1.endpoints import agent, demo, documents, files, health, search
+from app.core.security import require_api_key
 
 api_router = APIRouter()
 

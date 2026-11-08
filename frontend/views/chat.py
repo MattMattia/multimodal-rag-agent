@@ -2,19 +2,19 @@
 
 import html
 import uuid
-from typing import Any, Dict, List
+from typing import Any
 
+import api_client
 import pandas as pd
 import streamlit as st
 
-import api_client
 from views.diagnostics import last_diagnostics, render_diagnostics
 
 LAST_TURN_KEY = "last_turn_xray"
 THUMBS_UP = 1  # st.feedback("thumbs") returns 1 for 👍 and 0 for 👎
 
 
-def _render_citations(citations: List[Dict[str, Any]]) -> None:
+def _render_citations(citations: list[dict[str, Any]]) -> None:
     with st.expander(f"📚 Fuentes y Citas ({len(citations)})", expanded=False):
         for c in citations:
             doc_name = html.escape(str(c.get("document_name", "Documento")))
@@ -27,7 +27,7 @@ def _render_citations(citations: List[Dict[str, Any]]) -> None:
             )
 
 
-def _render_tools(tools: List[Dict[str, Any]]) -> None:
+def _render_tools(tools: list[dict[str, Any]]) -> None:
     with st.expander(f"🛠️ Herramientas Ejecutadas ({len(tools)})", expanded=False):
         for t in tools:
             tool_name = html.escape(str(t.get("tool_name", "tool")))
@@ -35,7 +35,7 @@ def _render_tools(tools: List[Dict[str, Any]]) -> None:
             st.json({"Entrada": t.get("tool_input"), "Salida": t.get("tool_output")})
 
 
-def _render_report_downloads(tools: List[Dict[str, Any]], key_prefix: str) -> None:
+def _render_report_downloads(tools: list[dict[str, Any]], key_prefix: str) -> None:
     for index, t in enumerate(tools):
         if t.get("tool_name") != "generate_report_pdf":
             continue
@@ -66,7 +66,7 @@ def _send_feedback(session_id: str, message_id: str) -> None:
         st.session_state.flash = ("error", f"No se pudo registrar la valoración: {res.get('error')}")
 
 
-def _render_assistant_extras(msg: Dict[str, Any], session_id: str) -> None:
+def _render_assistant_extras(msg: dict[str, Any], session_id: str) -> None:
     citations = msg.get("citations") or []
     tools = msg.get("executed_tools") or []
     if citations:
@@ -117,7 +117,7 @@ def handle_user_input(user_input: str, session_id: str, options: api_client.Chat
         st.markdown(user_input)
 
     with st.chat_message("assistant", avatar="🤖"):
-        metadata: Dict[str, Any] = {}
+        metadata: dict[str, Any] = {}
         st.write_stream(api_client.stream_chat_response(user_input, session_id, options, metadata))
         if metadata.get("error"):
             st.error(f"Error al comunicar con el agente: {metadata['error']}")
