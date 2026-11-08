@@ -56,6 +56,18 @@ def _split_preserving_whitespace(text: str) -> List[str]:
     return re.findall(r"\s*\S+\s*|\s+", text)
 
 
+def _usage_from_response(response: Any) -> Optional[Dict[str, int]]:
+    """Extrae el consumo de tokens de `usage_metadata` (None si el SDK no lo reporta)."""
+    usage_meta = getattr(response, "usage_metadata", None)
+    if not usage_meta:
+        return None
+    return {
+        "input": getattr(usage_meta, "prompt_token_count", 0) or 0,
+        "output": getattr(usage_meta, "candidates_token_count", 0) or 0,
+        "total": getattr(usage_meta, "total_token_count", 0) or 0,
+    }
+
+
 def _get_tool_declarations() -> List[Any]:
     """Define las especificaciones de las herramientas para Gemini Function Calling."""
     if not _USE_MODERN_GENAI:
@@ -283,12 +295,11 @@ class AutonomousAgentService:
         """Ejecuta generate_content probando el modelo preferido y recurriendo a modelos compatibles si está deprecado/sin cuota."""
         candidate_models = [
             getattr(self, "_working_model", None) or preferred_model or self.model_name,
+            "gemini-3.8-flash",
             "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.1-flash-lite",
             "gemini-3.5-flash-lite",
-            "gemini-flash-lite-latest",
-            "gemini-flash-latest",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
         ]
         seen = set()
         unique_models = []
@@ -332,12 +343,11 @@ class AutonomousAgentService:
         """Ejecuta generate_content_stream probando la cascada de modelos compatibles y produciendo tokens en vivo."""
         candidate_models = [
             getattr(self, "_working_model", None) or preferred_model or self.model_name,
+            "gemini-3.8-flash",
             "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.1-flash-lite",
             "gemini-3.5-flash-lite",
-            "gemini-flash-lite-latest",
-            "gemini-flash-latest",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
         ]
         seen = set()
         unique_models = []
@@ -436,11 +446,8 @@ class AutonomousAgentService:
             collected_citations = fb_response.citations
             executed_tools = fb_response.executed_tools
 
-            words = full_response.split(" ")
-            for i, w in enumerate(words):
-                chunk = w if i == len(words) - 1 else w + " "
+            for chunk in _split_preserving_whitespace(full_response):
                 yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
-                await asyncio.sleep(0.01)
         else:
             try:
                 tool_defs = _get_tool_declarations()
@@ -479,6 +486,7 @@ class AutonomousAgentService:
                         output=response.text
                         if getattr(response, "text", None)
                         else [fc.name for fc in (response.function_calls or [])],
+                        usage=_usage_from_response(response),
                         metadata={"turn": turn, "stream": True},
                     )
 
@@ -571,11 +579,8 @@ class AutonomousAgentService:
                 collected_citations = fb_response.citations
                 executed_tools = fb_response.executed_tools
 
-                words = full_response.split(" ")
-                for i, w in enumerate(words):
-                    chunk = w if i == len(words) - 1 else w + " "
+                for chunk in _split_preserving_whitespace(full_response):
                     yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
-                    await asyncio.sleep(0.01)
 
         # 5. Emitir evento final de metadata
         dedup_citations = self._deduplicate_citations(collected_citations)
@@ -682,13 +687,7 @@ class AutonomousAgentService:
             )
 
             # Registrar generación LLM en telemetría
-            usage_dict = None
-            if hasattr(response, "usage_metadata") and response.usage_metadata:
-                usage_dict = {
-                    "input": getattr(response.usage_metadata, "prompt_token_count", 0) or 0,
-                    "output": getattr(response.usage_metadata, "candidates_token_count", 0) or 0,
-                    "total": getattr(response.usage_metadata, "total_token_count", 0) or 0,
-                }
+            usage_dict = _usage_from_response(response)
             telemetry_service.record_generation(
                 parent=trace,
                 name=f"gemini_turn_{turn}",

@@ -2,17 +2,19 @@ import asyncio
 import hashlib
 import logging
 import math
-from typing import List, Optional
+from typing import List
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Backoff exponencial entre reintentos ante errores transitorios (429/503/timeouts)
+RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
+
 # Intentar importar el SDK moderno oficial google-genai
 _USE_MODERN_GENAI = False
 try:
     from google import genai
-    from google.genai import types
     _USE_MODERN_GENAI = True
 except ImportError:
     pass
@@ -58,6 +60,37 @@ class EmbeddingService:
         norm = math.sqrt(sum(x * x for x in vector)) or 1.0
         return [round(x / norm, 6) for x in vector]
 
+    @staticmethod
+    def _is_transient(exc: Exception) -> bool:
+        """Errores recuperables con reintento: 429/503, saturación de cuota y timeouts."""
+        if isinstance(exc, TimeoutError):  # en Python 3.11 asyncio.TimeoutError es TimeoutError
+            return True
+        if getattr(exc, "code", None) in (429, 503) or getattr(exc, "status_code", None) in (429, 503):
+            return True
+        text = str(exc)
+        if any(marker in text for marker in ("429", "503", "RESOURCE_EXHAUSTED", "UNAVAILABLE")):
+            return True
+        return "timeout" in text.lower() or "timed out" in text.lower()
+
+    async def _embed_with_retry(self, contents):
+        """Llama a la API de embeddings con hasta 3 reintentos (backoff 0.5s, 1s, 2s) ante errores transitorios.
+
+        Si el error persiste (o no es transitorio) se propaga: jamás se sustituye por vectores falsos
+        cuando hay una API key real, para no contaminar el índice vectorial.
+        """
+        attempt = 0
+        while True:
+            try:
+                return await self._client.aio.models.embed_content(model=self.model_name, contents=contents)
+            except Exception as e:
+                if attempt >= len(RETRY_BACKOFF_SECONDS) or not self._is_transient(e):
+                    logger.error("Error en API de embeddings (intento %d): %s", attempt + 1, e)
+                    raise
+                delay = RETRY_BACKOFF_SECONDS[attempt]
+                logger.warning("Error transitorio en embeddings (%s). Reintento %d en %.1fs", e, attempt + 1, delay)
+                await asyncio.sleep(delay)
+                attempt += 1
+
     async def get_embedding(self, text: str) -> List[float]:
         """Obtiene el embedding de un texto individual."""
         if not text or not text.strip():
@@ -65,23 +98,16 @@ class EmbeddingService:
 
         self._ensure_client()
 
+        # Modo demo/offline/test: sin cliente configurado se usan vectores determinísticos
         if not self._initialized or not self._client:
             return self._generate_mock_embedding(text)
 
-        try:
-            response = await self._client.aio.models.embed_content(
-                model=self.model_name,
-                contents=text,
-            )
-            # Manejar respuesta individual del SDK
-            if hasattr(response, "embedding") and response.embedding:
-                return response.embedding.values
-            elif hasattr(response, "embeddings") and response.embeddings:
-                return response.embeddings[0].values
-            return self._generate_mock_embedding(text)
-        except Exception as e:
-            logger.error("Error en API de embeddings para texto individual: %s", e)
-            return self._generate_mock_embedding(text)
+        response = await self._embed_with_retry(text)
+        if hasattr(response, "embedding") and response.embedding:
+            return response.embedding.values
+        if hasattr(response, "embeddings") and response.embeddings:
+            return response.embeddings[0].values
+        raise RuntimeError("La API de embeddings devolvió una respuesta sin vectores.")
 
     async def get_embeddings_batch(
         self, texts: List[str], batch_size: int = 50
@@ -99,21 +125,10 @@ class EmbeddingService:
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
-            try:
-                response = await self._client.aio.models.embed_content(
-                    model=self.model_name,
-                    contents=batch,
-                )
-                if hasattr(response, "embeddings") and response.embeddings:
-                    for emb in response.embeddings:
-                        all_embeddings.append(emb.values)
-                else:
-                    logger.warning("Respuesta de batch sin 'embeddings', usando fallback para lote.")
-                    all_embeddings.extend([self._generate_mock_embedding(t) for t in batch])
-            except Exception as e:
-                logger.error("Error en API de embeddings para lote %d-%d: %s", i, i + len(batch), e)
-                # Fallback seguro para no detener la ingesta
-                all_embeddings.extend([self._generate_mock_embedding(t) for t in batch])
+            response = await self._embed_with_retry(batch)
+            if not (hasattr(response, "embeddings") and response.embeddings):
+                raise RuntimeError("La API de embeddings devolvió un lote sin vectores.")
+            all_embeddings.extend(emb.values for emb in response.embeddings)
 
         return all_embeddings
 

@@ -2,14 +2,16 @@ from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 
+from app.api.v1.endpoints.files import report_response
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.database import init_db
+from app.core.rate_limit import RateLimitMiddleware
 from app.core.security import require_api_key
+from app.models.chat import ensure_chat_schema
 
 # Configuración básica de logging
 logging.basicConfig(
@@ -30,6 +32,10 @@ async def lifespan(app: FastAPI):
 
     # Inicializar tablas y extensiones en PostgreSQL
     await init_db()
+    try:
+        await ensure_chat_schema()
+    except Exception as exc:  # la BD puede no estar lista aún; init_db ya registró el aviso
+        logger.warning("No se pudo asegurar el esquema de chat_messages: %s", exc)
 
     yield
     logger.info("Apagando %s...", settings.PROJECT_NAME)
@@ -44,6 +50,9 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+# Rate limiting (se añade antes que CORS para que CORS quede como capa externa y cubra también los 429)
+app.add_middleware(RateLimitMiddleware)
 
 # Configuración de Middleware CORS
 app.add_middleware(
@@ -61,12 +70,8 @@ REPORTS_DIR = Path("uploads/reports")
 
 @app.get("/uploads/reports/{filename}", tags=["Reports"], dependencies=[Depends(require_api_key)])
 async def download_report(filename: str):
-    """Descarga un reporte PDF generado por el agente (solo archivos dentro del directorio de reportes)."""
-    base = REPORTS_DIR.resolve()
-    candidate = (base / filename).resolve()
-    if not candidate.is_relative_to(base) or candidate.suffix.lower() != ".pdf" or not candidate.is_file():
-        raise HTTPException(status_code=404, detail="Reporte no encontrado.")
-    return FileResponse(candidate, media_type="application/pdf", filename=candidate.name)
+    """Ruta legada de descarga de reportes (retrocompatibilidad); reutiliza el helper de /api/v1/reports."""
+    return report_response(REPORTS_DIR, filename)
 
 
 @app.get("/health", tags=["General"])

@@ -331,3 +331,52 @@ async def test_citations_carry_rerank_score(no_langfuse):
     assert len(deduped) == 1 and deduped[0].rerank_score == 0.5
 
 
+
+
+# ==============================================================================
+# R2-BUG-02: lossless fallback streaming without sleep, token usage in streaming
+# ==============================================================================
+from app.schemas.agent import AgentChatResponse
+
+MARKDOWN_REPLY = "# Informe\n\n- item uno\n- item  dos\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n  cola con espacios \n"
+
+
+def _fallback_response(text: str) -> AgentChatResponse:
+    return AgentChatResponse(response=text, citations=[], executed_tools=[], session_id=uuid.uuid4())
+
+
+@pytest.mark.parametrize("client_ready", [False, True])
+async def test_fallback_stream_is_lossless_and_never_sleeps(no_langfuse, client_ready):
+    service = AutonomousAgentService()
+    service._client = object() if client_ready else None
+    service._ensure_client = lambda: client_ready  # type: ignore[method-assign]
+    service._call_gemini_with_fallback = AsyncMock(side_effect=RuntimeError("gemini down"))  # type: ignore[method-assign]
+    service._execute_fallback_turn = AsyncMock(return_value=_fallback_response(MARKDOWN_REPLY))  # type: ignore[method-assign]
+    sleep = AsyncMock()
+
+    with patch("app.services.agent.asyncio", SimpleNamespace(sleep=sleep)):
+        events = [e async for e in service.execute_turn_stream(db=_fake_db(), user_message="hola")]
+
+    payloads = [_json.loads(e[len("data: "):]) for e in events]
+    tokens = [p["content"] for p in payloads if p["type"] == "token"]
+    assert "".join(tokens) == MARKDOWN_REPLY
+    assert len(tokens) > 1
+    assert any("\n\n" in t for t in tokens)
+    assert payloads[-1]["type"] == "metadata"
+    sleep.assert_not_awaited()
+
+
+async def test_stream_records_token_usage_from_usage_metadata(no_langfuse):
+    response = _text_response("respuesta")
+    response.usage_metadata = SimpleNamespace(prompt_token_count=11, candidates_token_count=7, total_token_count=18)
+    service = _make_service([response])
+    with patch("app.services.agent.telemetry_service.record_generation") as record_gen:
+        _ = [e async for e in service.execute_turn_stream(db=_fake_db(), user_message="hola")]
+    assert record_gen.call_args.kwargs["usage"] == {"input": 11, "output": 7, "total": 18}
+
+
+async def test_stream_usage_is_none_without_usage_metadata(no_langfuse):
+    service = _make_service([_text_response("respuesta")])
+    with patch("app.services.agent.telemetry_service.record_generation") as record_gen:
+        _ = [e async for e in service.execute_turn_stream(db=_fake_db(), user_message="hola")]
+    assert record_gen.call_args.kwargs["usage"] is None

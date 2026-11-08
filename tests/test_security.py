@@ -262,3 +262,40 @@ async def test_delete_document_removes_image_files(http, tmp_path, monkeypatch):
     assert not img2.exists()
     session.delete.assert_awaited_once_with(doc)
     session.commit.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# R2-BUG-06: webhook port allow-list and error message hiding
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("port", ["", ":80", ":443", ":8000", ":8080", ":8443"])
+def test_validate_webhook_url_allows_standard_ports(port):
+    url = f"https://8.8.8.8{port}/hook"
+    assert validate_webhook_url(url) == url
+
+
+@pytest.mark.parametrize("port", [22, 5432, 6379, 9000])
+def test_validate_webhook_url_rejects_non_standard_ports(port):
+    with pytest.raises(ValueError, match="puerto"):
+        validate_webhook_url(f"https://8.8.8.8:{port}/hook")
+
+
+def test_validate_webhook_url_allows_non_standard_port_for_allow_listed_host(monkeypatch):
+    monkeypatch.setattr(settings, "ALLOWED_WEBHOOK_HOSTS", ["8.8.8.8"])
+    url = "https://8.8.8.8:9000/hook"
+    assert validate_webhook_url(url) == url
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("debug, expect_detail", [(False, False), (True, True)])
+async def test_dispatch_webhook_hides_error_detail_unless_debug(monkeypatch, debug, expect_detail):
+    monkeypatch.setattr(settings, "DEBUG", debug)
+    client = MagicMock()
+    client.post = AsyncMock(side_effect=RuntimeError("internal-host-10.1.2.3 refused"))
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    with patch("app.tools.webhook_tool.httpx.AsyncClient", MagicMock(return_value=client)):
+        result = await execute_dispatch_webhook("evt", {}, target_url="https://8.8.8.8/hook")
+    assert result["status"] == "simulated"
+    assert result["status_code"] == 200
+    assert ("internal-host-10.1.2.3" in result["message"]) is expect_detail
+    assert "evt" in result["message"]

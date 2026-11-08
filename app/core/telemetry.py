@@ -330,6 +330,26 @@ class TelemetryService:
 
         return DummySpan(name)
 
+    def record_score(
+        self,
+        name: str,
+        value: float,
+        trace_id: str,
+        comment: Optional[str] = None,
+    ) -> bool:
+        """Envía un score (p. ej. feedback de usuario) a Langfuse; no hace nada si la telemetría está inactiva."""
+        if not self.is_enabled or not self._client:
+            return False
+        try:
+            scorer = getattr(self._client, "score", None) or getattr(self._client, "create_score", None)
+            if scorer is None:
+                return False
+            scorer(name=name, value=value, trace_id=trace_id, comment=comment)
+            return True
+        except Exception as e:
+            logger.debug("Error registrando score en Langfuse: %s", e)
+            return False
+
     def flush(self) -> None:
         """Envía de forma no bloqueante las trazas pendientes al servidor de Langfuse."""
         if self.is_enabled and self._client and hasattr(self._client, "flush"):

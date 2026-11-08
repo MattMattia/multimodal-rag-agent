@@ -346,7 +346,7 @@ for msg in history_messages:
                         fn = output.get("filename", "reporte.pdf")
                         if dl_url:
                             pdf_data = fetch_file_bytes(dl_url)
-                            col_b1, col_b2 = st.columns([1, 2])
+                            col_b1, _ = st.columns([1, 2])
                             with col_b1:
                                 if pdf_data:
                                     st.download_button(
@@ -356,9 +356,6 @@ for msg in history_messages:
                                         mime="application/pdf",
                                         key=f"dl_{msg.get('id', uuid.uuid4())}",
                                     )
-                            with col_b2:
-                                public_link = f"{PUBLIC_API_URL}{dl_url}"
-                                st.markdown(f"[🔗 Abrir PDF directamente en el navegador]({public_link})")
 
 
 # ==============================================================================
@@ -421,7 +418,7 @@ if user_input:
                         fn = output.get("filename", "reporte.pdf")
                         if dl_url:
                             pdf_data = fetch_file_bytes(dl_url)
-                            col_b1, col_b2 = st.columns([1, 2])
+                            col_b1, _ = st.columns([1, 2])
                             with col_b1:
                                 if pdf_data:
                                     st.download_button(
@@ -431,9 +428,6 @@ if user_input:
                                         mime="application/pdf",
                                         key=f"dl_new_{uuid.uuid4()}",
                                     )
-                            with col_b2:
-                                public_link = f"{PUBLIC_API_URL}{dl_url}"
-                                st.markdown(f"[🔗 Abrir PDF directamente en el navegador]({public_link})")
 
             # Recargar para sincronizar estado completo con PostgreSQL
             st.rerun()

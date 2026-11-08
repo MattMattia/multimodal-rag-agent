@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 import uuid
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -83,3 +83,28 @@ class ChatHistoryResponse(BaseModel):
     total_messages: int
     messages: List[ChatMessageResponse]
 
+
+
+class SessionSummary(BaseModel):
+    """Resumen de una sesión de chat derivado de sus mensajes."""
+
+    session_id: uuid.UUID
+    title: str = Field(..., description="Primeros 80 caracteres del primer mensaje del usuario")
+    created_at: datetime
+    updated_at: datetime
+    message_count: int
+
+
+class FeedbackRequest(BaseModel):
+    """Valoración del usuario sobre un mensaje del agente."""
+
+    session_id: uuid.UUID
+    message_id: uuid.UUID
+    rating: Literal[1, -1] = Field(..., description="1 = útil, -1 = no útil")
+    comment: Optional[str] = Field(default=None, max_length=2000)
+
+
+class FeedbackResponse(BaseModel):
+    status: str = "ok"
+    message_id: uuid.UUID
+    rating: int

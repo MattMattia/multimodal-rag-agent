@@ -1,5 +1,6 @@
 import secrets
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Union
 
 from fastapi import Header, HTTPException, status
 
@@ -23,3 +24,19 @@ def error_detail(public_message: str, exc: Exception) -> str:
     if settings.DEBUG:
         return f"{public_message}: {exc}"
     return public_message
+
+
+def resolve_within(base: Union[str, Path], candidate: Union[str, Path]) -> Optional[Path]:
+    """Resuelve `candidate` (ruta completa, relativa al cwd) y la devuelve solo si es un archivo existente contenido en `base`.
+
+    Única barrera de contención de rutas para todos los endpoints que sirven archivos
+    (bloquea `..`, rutas absolutas y enlaces simbólicos que escapen del directorio base).
+    """
+    try:
+        base_resolved = Path(base).resolve()
+        resolved = Path(candidate).resolve()
+    except (OSError, ValueError):
+        return None
+    if not resolved.is_relative_to(base_resolved) or not resolved.is_file():
+        return None
+    return resolved

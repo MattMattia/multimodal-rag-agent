@@ -20,7 +20,7 @@ from app.schemas.document import (
     DocumentResponse,
     DocumentUploadResponse,
 )
-from app.services.ingestion import ingestion_service
+from app.services.ingestion import ingestion_service, remove_document_images
 
 logger = logging.getLogger(__name__)
 
@@ -332,5 +332,7 @@ async def delete_document(
 
     await db.delete(doc)
     await db.commit()
+    # Limpia también PNG huérfanos `{document_id}_*` que no tuvieran fila en BD
+    remove_document_images(document_id)
     return None
 

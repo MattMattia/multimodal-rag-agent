@@ -14,6 +14,9 @@ DEFAULT_MOCK_WEBHOOK_URL = "https://httpbin.org/post"
 
 INTERNAL_HOSTNAMES = {"db", "api", "frontend", "langfuse", "localhost"}
 
+# Puertos de destino permitidos (None = puerto por defecto del esquema) salvo hosts en ALLOWED_WEBHOOK_HOSTS
+ALLOWED_WEBHOOK_PORTS = {None, 80, 443, 8000, 8080, 8443}
+
 
 def _is_forbidden_ip(ip: ipaddress._BaseAddress) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
@@ -44,8 +47,11 @@ def validate_webhook_url(url: str) -> str:
     if not host:
         raise ValueError("La URL del webhook no tiene host.")
 
-    if scheme == "http" and host not in {h.lower() for h in settings.ALLOWED_WEBHOOK_HOSTS}:
+    allowed_hosts = {h.lower() for h in settings.ALLOWED_WEBHOOK_HOSTS}
+    if scheme == "http" and host not in allowed_hosts:
         raise ValueError("Webhooks http solo se permiten hacia hosts en ALLOWED_WEBHOOK_HOSTS.")
+    if port not in ALLOWED_WEBHOOK_PORTS and host not in allowed_hosts:
+        raise ValueError(f"El puerto {port} no está permitido para webhooks (host fuera de ALLOWED_WEBHOOK_HOSTS).")
 
     try:
         literal_ip: Optional[ipaddress._BaseAddress] = ipaddress.ip_address(host)
@@ -124,11 +130,14 @@ async def execute_dispatch_webhook(
     except Exception as e:
         logger.warning("Fallo en la entrega real del webhook a %s: %s. Simulando entrega local exitosa.", url, e)
         # En caso de no tener salida a internet o URL no disponible en dev, simular entrega para no abortar el agente
+        message = f"Webhook '{event_type}' procesado en modo simulado local."
+        if settings.DEBUG:
+            message = f"{message[:-1]} debido a: {str(e)}"
         return {
             "status": "simulated",
             "status_code": 200,
             "event_type": event_type,
             "target_url": url,
-            "message": f"Webhook '{event_type}' procesado en modo simulado local debido a: {str(e)}",
+            "message": message,
         }
 

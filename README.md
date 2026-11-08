@@ -182,6 +182,9 @@ MAX_UPLOAD_SIZE_MB=25           # Tamaño máximo de subida; por encima responde
 | `API_KEY` | vacío (acceso abierto) | Activa la autenticación por header `X-API-Key` en `/api/v1/*` y en la descarga de reportes. `/health` permanece abierto. |
 | `ALLOWED_WEBHOOK_HOSTS` | vacío | Lista de hosts a los que se permite enviar webhooks por `http://`. Las IPs privadas, loopback y nombres internos siempre se bloquean (anti-SSRF). |
 | `MAX_UPLOAD_SIZE_MB` | `25` | Límite de tamaño por archivo subido. Si se supera, la API responde `413` y elimina el archivo parcial. |
+| `SEARCH_CANDIDATE_MULTIPLIER` | `4` | Candidatos recuperados por modo de búsqueda antes de la fusión: `min(top_k × multiplicador, 80)`. |
+| `RATE_LIMIT_ENABLED` | `true` | Activa el límite de peticiones por IP (ventana deslizante en memoria). Se desactiva automáticamente bajo `pytest`. |
+| `RATE_LIMIT_PER_MINUTE` | `60` | Peticiones máximas por IP y minuto; al superarlo la API responde `429` con cabecera `Retry-After`. `/health` y `/api/v1/health` están exentos. |
 
 ### Paso 3: Desplegar la Infraestructura con Docker Compose
 ```bash
@@ -210,6 +213,13 @@ Una vez levantado:
 | `POST` | `/api/v1/agent/chat/stream` | Respuestas en Streaming en tiempo real (Server-Sent Events) |
 | `GET` | `/api/v1/agent/sessions/{session_id}/history` | Historial persistido de una conversación |
 | `GET` | `/uploads/reports/{filename}` | Descarga de reportes PDF generados por el agente (exige `X-API-Key` si `API_KEY` está definida; solo sirve archivos dentro de `uploads/reports/`) |
+| `GET` | `/api/v1/reports/{filename}` | Reporte PDF generado por el agente (`Content-Disposition: inline`); mismo control de contención que la ruta legada |
+| `GET` | `/api/v1/documents/{id}/file` | Archivo original subido (autenticado, contenido en `uploads/documents/`) |
+| `GET` | `/api/v1/documents/{id}/images/{image_id}/file` | Imagen extraída o subida (`image/png`, `image/jpeg`, `image/webp`); verifica que pertenezca al documento |
+| `GET` | `/api/v1/agent/sessions` | Sesiones de chat (`session_id`, `title`, `created_at`, `updated_at`, `message_count`) por `updated_at` descendente |
+| `DELETE` | `/api/v1/agent/sessions/{session_id}` | Elimina los mensajes de una sesión (`204`, o `404` si no existe) |
+| `GET` | `/api/v1/agent/sessions/{session_id}/export?format=markdown\|pdf` | Exporta la conversación con citas y herramientas ejecutadas |
+| `POST` | `/api/v1/agent/feedback` | Feedback `{session_id, message_id, rating: 1\|-1, comment}`; se guarda en `message_metadata` y se envía a Langfuse si está activo |
 
 ---
 

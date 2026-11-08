@@ -1,11 +1,12 @@
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 import uuid
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.telemetry import telemetry_service
 from app.models.document import Document, DocumentChunk
 from app.schemas.search import SearchRequest, SearchResponse, SearchResultItem
@@ -14,6 +15,7 @@ from app.services.reranker import reranker_service
 
 logger = logging.getLogger(__name__)
 
+MAX_RETRIEVAL_CANDIDATES = 80
 SWAGGER_DUMMY_UUID = uuid.UUID("3fa85f64-5717-4562-b3fc-2c963f66afa6")
 
 
@@ -66,7 +68,7 @@ class HybridSearchService:
             metadata={"filter_document_id": str(doc_filter) if doc_filter else None},
         ) as search_span:
             # Recuperar pool extendido para que RRF tenga suficiente solapamiento
-            retrieval_limit = min(top_k * 3, 50)
+            retrieval_limit = min(top_k * settings.SEARCH_CANDIDATE_MULTIPLIER, MAX_RETRIEVAL_CANDIDATES)
 
             dense_items: List[Dict[str, Any]] = []
             sparse_items: List[Dict[str, Any]] = []

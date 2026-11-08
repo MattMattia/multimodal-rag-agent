@@ -16,6 +16,18 @@ from app.services.vision import vision_service
 
 logger = logging.getLogger(__name__)
 
+UPLOAD_IMAGES_DIR = Path("uploads/images")
+VISION_ERROR_PREFIX = "[Error al procesar imagen"
+
+
+def remove_document_images(document_id: uuid.UUID) -> None:
+    """Borra del disco todas las imágenes `{document_id}_*` (extraídas de PDFs), incluso huérfanas sin fila en BD."""
+    for orphan in UPLOAD_IMAGES_DIR.glob(f"{document_id}_*"):
+        try:
+            orphan.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning("No se pudo borrar la imagen huérfana %s: %s", orphan, e)
+
 # Fallback si langchain_text_splitters no está instalado directamente en local
 try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -234,7 +246,11 @@ class IngestionService:
                 chunks_res = await db.execute(
                     select(DocumentChunk).where(DocumentChunk.document_id == doc.id)
                 )
-                chunks_to_embed = chunks_res.scalars().all()
+                all_chunks = chunks_res.scalars().all()
+                # Solo los chunks hoja se vectorizan: los padres con hijos quedan con embedding=None
+                # y sirven únicamente de contexto (_expand_to_parents), sin competir con sus hijos en el top_k.
+                parent_ids_with_children = {c.parent_id for c in all_chunks if c.parent_id is not None}
+                chunks_to_embed = [c for c in all_chunks if c.id not in parent_ids_with_children]
                 if chunks_to_embed:
                     logger.info("Generando embeddings para %d fragmentos...", len(chunks_to_embed))
                     texts = [c.content for c in chunks_to_embed]
@@ -273,6 +289,8 @@ class IngestionService:
                     await db.commit()
                 except Exception as rollback_err:
                     logger.error("Error al persistir estado fallido en BD para %s: %s", document_id, rollback_err)
+                # Los PNG ya escritos en disco quedan huérfanos tras el rollback: eliminarlos
+                remove_document_images(document_id)
 
     async def _process_pdf(
         self, db: AsyncSession, doc: Document, file_path: Path
@@ -286,7 +304,7 @@ class IngestionService:
         total_tables = 0
 
         total_pages, pages = await asyncio.to_thread(
-            extract_pdf_pages_sync, file_path, doc.id, Path("uploads/images")
+            extract_pdf_pages_sync, file_path, doc.id, UPLOAD_IMAGES_DIR
         )
 
         for page in pages:
@@ -325,6 +343,10 @@ class IngestionService:
                         )
                     )
                     total_images += 1
+
+                    # Un error de visión se conserva como nota en DocumentImage pero no se indexa
+                    if description.startswith(VISION_ERROR_PREFIX):
+                        continue
 
                     img_chunk_content = (
                         f"### [Imagen/Diagrama Técnico - Página {page_idx}]\n"
@@ -442,6 +464,13 @@ class IngestionService:
             image_metadata={"prompt_type": prompt_type, "original_filename": doc.filename},
         )
         db.add(doc_image)
+
+        # Un error de visión se conserva como nota en DocumentImage pero no se indexa
+        if description.startswith(VISION_ERROR_PREFIX):
+            return 0, total_images, {
+                "document_type": "receipt" if is_receipt else "image_diagram",
+                "pages": 1,
+            }
 
         # Chunking jerárquico de la descripción generada
         total_chunks = self._add_hierarchical_chunks(

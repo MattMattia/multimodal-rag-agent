@@ -123,3 +123,60 @@ async def test_search_endpoint_with_rerank_disabled():
         assert data["mode"] == "dense"
         assert isinstance(data["results"], list)
 
+
+
+# ---------------------------------------------------------------------------
+# R2-BUG-04: candidate window and leaf-only dense retrieval
+# ---------------------------------------------------------------------------
+from unittest.mock import AsyncMock, MagicMock
+
+from sqlalchemy import delete
+
+from app.core.config import settings
+from app.core.database import AsyncSessionLocal
+from app.models.document import Document, DocumentChunk
+from app.schemas.search import SearchRequest
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "top_k, multiplier, expected_limit",
+    [(5, 4, 20), (30, 4, 80), (50, 4, 80), (5, 2, 10)],
+)
+async def test_candidate_window_is_top_k_times_multiplier_capped_at_80(monkeypatch, top_k, multiplier, expected_limit):
+    monkeypatch.setattr(settings, "SEARCH_CANDIDATE_MULTIPLIER", multiplier)
+    dense = AsyncMock(return_value=[])
+    sparse = AsyncMock(return_value=[])
+    monkeypatch.setattr(hybrid_search_service, "_dense_retrieval", dense)
+    monkeypatch.setattr(hybrid_search_service, "_sparse_retrieval", sparse)
+    request = SearchRequest(query="hola", top_k=top_k, mode="hybrid", rerank=False, include_parent=False)
+
+    response = await hybrid_search_service.search(db=MagicMock(), request=request)
+
+    assert response.total_results == 0
+    assert dense.await_args.kwargs["limit"] == expected_limit
+    assert sparse.await_args.kwargs["limit"] == expected_limit
+
+
+@pytest.mark.asyncio
+async def test_dense_retrieval_ignores_chunks_without_embedding():
+    doc_id, parent_id, child_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    vector = [0.1] * 768
+    async with AsyncSessionLocal() as db:
+        db.add(Document(id=doc_id, filename="d.pdf", file_type="pdf", file_path="x", status="completed", doc_metadata={}))
+        await db.flush()
+        db.add(DocumentChunk(id=parent_id, document_id=doc_id, content="padre", chunk_type="text", chunk_metadata={}))
+        await db.flush()
+        db.add(DocumentChunk(id=child_id, document_id=doc_id, parent_id=parent_id, content="hijo",
+                             chunk_type="text", chunk_metadata={}, embedding=vector))
+        await db.commit()
+    try:
+        async with AsyncSessionLocal() as db:
+            items = await hybrid_search_service._dense_retrieval(
+                db=db, query_vector=vector, limit=10, filter_document_id=doc_id
+            )
+        assert [i["chunk_id"] for i in items] == [child_id]
+    finally:
+        async with AsyncSessionLocal() as db:
+            await db.execute(delete(Document).where(Document.id == doc_id))
+            await db.commit()

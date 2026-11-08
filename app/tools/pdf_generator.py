@@ -1,4 +1,6 @@
 from datetime import datetime
+import io
+import json
 import logging
 from pathlib import Path
 import re
@@ -161,3 +163,55 @@ def execute_generate_report_pdf(
         "message": f"Reporte PDF '{title}' generado exitosamente.",
     }
 
+
+
+def build_conversation_pdf(session_id: uuid.UUID, messages: List[Dict[str, Any]]) -> bytes:
+    """Maqueta una conversación completa (mensajes, citas y herramientas) como PDF ejecutivo en memoria.
+
+    Síncrona (CPU): ejecutar con asyncio.to_thread. Todo el texto se escapa para ReportLab.
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "ConvTitle", parent=styles["Heading1"], fontName="Helvetica-Bold", fontSize=18,
+        textColor=colors.HexColor("#1e293b"), spaceAfter=6,
+    )
+    meta_style = ParagraphStyle(
+        "ConvMeta", parent=styles["Normal"], fontSize=9, textColor=colors.HexColor("#64748b"), spaceAfter=12
+    )
+    role_style = ParagraphStyle(
+        "ConvRole", parent=styles["Heading3"], fontName="Helvetica-Bold", fontSize=11,
+        textColor=colors.HexColor("#0f172a"), spaceBefore=10, spaceAfter=4,
+    )
+    body_style = ParagraphStyle(
+        "ConvBody", parent=styles["Normal"], fontSize=10, leading=14,
+        textColor=colors.HexColor("#334155"), spaceAfter=6,
+    )
+    small_style = ParagraphStyle(
+        "ConvSmall", parent=body_style, fontSize=8.5, leading=11, leftIndent=12,
+        textColor=colors.HexColor("#475569"), spaceAfter=2,
+    )
+
+    elements: List[Any] = [
+        Paragraph("Conversación con el Agente IA", title_style),
+        Paragraph(
+            escape(f"Sesión {session_id} | Exportado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"),
+            meta_style,
+        ),
+    ]
+    for msg in messages:
+        role_label = {"user": "Usuario", "assistant": "Agente"}.get(msg["role"], str(msg["role"]))
+        elements.append(Paragraph(escape(role_label), role_style))
+        elements.append(Paragraph(escape(msg["content"]).replace("\n", "<br/>"), body_style))
+        for cit in msg.get("citations") or []:
+            page = f", Pág {cit['page_number']}" if cit.get("page_number") else ""
+            elements.append(Paragraph(escape(f"Fuente: {cit.get('document_name', '?')}{page}"), small_style))
+        for tool in msg.get("executed_tools") or []:
+            args = json.dumps(tool.get("tool_input", {}), ensure_ascii=False, default=str)[:200]
+            elements.append(Paragraph(escape(f"Herramienta: {tool.get('tool_name', '?')} {args}"), small_style))
+
+    doc.build(elements)
+    return buffer.getvalue()

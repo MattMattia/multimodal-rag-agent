@@ -69,3 +69,5 @@ Thumbs.db
 *.log
 logs/
 
+# Local AI runtime state
+.atl/

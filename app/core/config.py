@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     ALLOWED_WEBHOOK_HOSTS: List[str] = []  # hosts a los que se permite webhooks http (no https)
     MAX_UPLOAD_SIZE_MB: float = 25
 
+    # Búsqueda
+    SEARCH_CANDIDATE_MULTIPLIER: int = 4  # candidatos por modo = min(top_k * multiplicador, 80)
+
+    # Rate limiting (ventana deslizante en memoria por IP)
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_PER_MINUTE: int = 60
+
     # CORS
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000", "http://localhost:8501"]
 

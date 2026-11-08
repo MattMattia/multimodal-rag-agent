@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import DateTime, String, Text, func
+from sqlalchemy import DateTime, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -25,7 +25,23 @@ class ChatMessage(Base):
     executed_tools: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"), default=list, nullable=True
     )
+    # Metadatos libres del mensaje (p. ej. feedback del usuario: {"feedback": {"rating": 1, "comment": ...}})
+    message_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), default=dict, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
 
+
+
+async def ensure_chat_schema() -> None:
+    """Migración idempotente: añade `message_metadata` a `chat_messages` si la tabla ya existía (PostgreSQL)."""
+    from app.core.database import engine
+
+    if engine.dialect.name != "postgresql":
+        return
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS message_metadata JSONB;")
+        )

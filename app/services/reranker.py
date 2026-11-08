@@ -4,7 +4,6 @@ import logging
 import os
 import re
 from typing import Any, Dict, List, Optional
-import uuid
 
 from app.core.config import settings
 from app.core.telemetry import telemetry_service
@@ -148,12 +147,11 @@ Ejemplo de respuesta esperada:
 """
         candidate_models = [
             self._working_model or self.model_name,
+            "gemini-3.8-flash",
             "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.1-flash-lite",
             "gemini-3.5-flash-lite",
-            "gemini-flash-lite-latest",
-            "gemini-flash-latest",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
         ]
 
         seen = set()

@@ -198,7 +198,10 @@ async def test_pdf_ingestion_runs_pdfplumber_in_thread_with_one_flush_and_one_fi
     chunks = [o for o in session.added if isinstance(o, DocumentChunk)]
     assert doc.doc_metadata["total_chunks"] == len(chunks)
     assert {c.chunk_type for c in chunks} >= {"table", "image_description", "text"}
-    assert all(c.embedding is not None for c in chunks)
+    # R2-BUG-04: only leaf chunks are embedded; parents that have children keep embedding=None
+    parents_with_children = {c.parent_id for c in chunks if c.parent_id is not None}
+    for c in chunks:
+        assert (c.embedding is None) == (c.id in parents_with_children)
 
     # Children link to pre-generated parent ids and parents precede their children
     ids = {c.id for c in chunks if c.id is not None}
