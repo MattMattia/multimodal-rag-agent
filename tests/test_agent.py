@@ -405,3 +405,114 @@ async def test_stream_emits_tool_start_before_tool_end_and_metadata_message_id(n
     assert metadata["type"] == "metadata"
     assistant_rows = [c.args[0] for c in db.add.call_args_list if getattr(c.args[0], "role", None) == "assistant"]
     assert str(assistant_rows[-1].id) == metadata["message_id"]
+
+
+# --- Judgment Day corrections (JD-3..JD-6) -----------------------------------
+def _payloads(events: list[str]) -> list[dict]:
+    return [_json.loads(e[len("data: "):]) for e in events]
+
+
+def _no_key_service(response: AgentChatResponse) -> AutonomousAgentService:
+    service = AutonomousAgentService()
+    service._client = None
+    service._ensure_client = lambda: False  # type: ignore[method-assign]
+    service._execute_fallback_turn = AsyncMock(return_value=response)  # type: ignore[method-assign]
+    return service
+
+
+async def test_stream_persists_assistant_before_metadata_is_emitted(no_langfuse):
+    """JD-3: the announced message_id already exists in the database when the client receives it."""
+    service = _no_key_service(_fallback_response("respuesta"))
+    db = _fake_db()
+    commits_at_metadata = None
+    async for event in service.execute_turn_stream(db=db, user_message="hola"):
+        if _json.loads(event[len("data: "):])["type"] == "metadata":
+            commits_at_metadata = db.commit.await_count
+    assert commits_at_metadata == 2  # user row + assistant row, both committed before metadata
+
+
+async def test_stream_metadata_message_id_is_null_when_persistence_fails(no_langfuse):
+    """JD-3: a failed assistant commit never leaks an id that does not exist."""
+    service = _no_key_service(_fallback_response("respuesta"))
+    db = _fake_db()
+    db.commit = AsyncMock(side_effect=[None, RuntimeError("db down")])
+    db.rollback = AsyncMock()
+
+    payloads = _payloads([e async for e in service.execute_turn_stream(db=db, user_message="hola")])
+
+    assert payloads[-1]["type"] == "metadata"
+    assert payloads[-1]["message_id"] is None
+    db.rollback.assert_awaited_once()
+
+
+async def test_stream_stores_real_trace_id_in_assistant_metadata(no_langfuse):
+    """JD-4: the assistant row keeps the Langfuse trace id so feedback scores attach to the real trace."""
+    service = _no_key_service(_fallback_response("respuesta"))
+    db = _fake_db()
+    fake_trace = SimpleNamespace(id="trace-xyz", update=lambda **_: None, end=lambda: None)
+    with patch("app.services.agent.telemetry_service.start_trace", return_value=fake_trace):
+        _ = [e async for e in service.execute_turn_stream(db=db, user_message="hola")]
+    assistant = [c.args[0] for c in db.add.call_args_list if getattr(c.args[0], "role", None) == "assistant"][-1]
+    assert assistant.message_metadata == {"trace_id": "trace-xyz"}
+
+
+async def test_stream_without_telemetry_stores_no_trace_id(no_langfuse):
+    """JD-4: a DummyTrace (telemetry off) never produces an orphan trace id."""
+    service = _no_key_service(_fallback_response("respuesta"))
+    db = _fake_db()
+    _ = [e async for e in service.execute_turn_stream(db=db, user_message="hola")]
+    assistant = [c.args[0] for c in db.add.call_args_list if getattr(c.args[0], "role", None) == "assistant"][-1]
+    assert not (assistant.message_metadata or {}).get("trace_id")
+
+
+async def test_stream_with_missing_filter_document_ends_with_metadata(no_langfuse):
+    """JD-5: a missing filter_document_id becomes a tool error result, not a broken SSE stream."""
+    from app.schemas.agent import AgentOptions
+
+    service = AutonomousAgentService()
+    service._client = None
+    service._ensure_client = lambda: False  # type: ignore[method-assign]
+    options = AgentOptions(filter_document_id=uuid.uuid4())
+
+    async with AsyncSessionLocal() as db:
+        events = [
+            e
+            async for e in service.execute_turn_stream(
+                db=db, user_message="¿Quién es Mattia?", session_id=uuid.uuid4(), options=options
+            )
+        ]
+
+    payloads = _payloads(events)
+    assert payloads[-1]["type"] == "metadata"
+    search_tool = next(t for t in payloads[-1]["executed_tools"] if t["tool_name"] == "search_knowledge_base")
+    assert "no existe" in search_tool["tool_output"]["error"]
+    text = "".join(p["content"] for p in payloads if p["type"] == "token")
+    assert "No se pudo consultar la base de conocimientos" in text
+
+
+async def test_stream_gemini_failure_after_tokens_persists_exactly_what_was_streamed(no_langfuse):
+    """JD-6: no silent second answer; a visible separator, and persisted content == streamed tokens."""
+    from app.services.agent import STREAM_FALLBACK_SEPARATOR
+
+    service = _make_service([_tool_call_response()])
+    service._resolve_max_turns = lambda _options: 1  # type: ignore[method-assign]
+
+    async def _broken_stream(**_kwargs):
+        yield "respuesta parcial "
+        raise RuntimeError("stream cut")
+
+    service._call_gemini_stream_with_fallback = _broken_stream  # type: ignore[method-assign]
+    pdf_record = ToolExecutionRecord(tool_name="generate_report_pdf", tool_input={"title": "t"}, tool_output={})
+    fallback = _fallback_response("respaldo")
+    fallback.executed_tools = [pdf_record]
+    service._execute_fallback_turn = AsyncMock(return_value=fallback)  # type: ignore[method-assign]
+    db = _fake_db()
+
+    payloads = _payloads([e async for e in service.execute_turn_stream(db=db, user_message="hola")])
+
+    streamed = "".join(p["content"] for p in payloads if p["type"] == "token")
+    assert streamed == f"respuesta parcial {STREAM_FALLBACK_SEPARATOR}respaldo"
+    assistant = [c.args[0] for c in db.add.call_args_list if getattr(c.args[0], "role", None) == "assistant"][-1]
+    assert assistant.content == streamed
+    starts = [p["tool_name"] for p in payloads if p["type"] == "tool_start"]
+    assert starts == ["search_knowledge_base", "generate_report_pdf"]  # no replayed tool events

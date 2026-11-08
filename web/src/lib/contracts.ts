@@ -87,8 +87,11 @@ export interface MetadataEvent {
   citations: CitationItem[];
   executed_tools: ToolExecutionRecord[];
   session_id: string;
-  /** Id of the persisted assistant message, used for feedback. Optional for backends that predate it. */
-  message_id?: string;
+  /**
+   * Id of the persisted assistant message, used for feedback. `null` when the backend could not persist it;
+   * absent on backends that predate it.
+   */
+  message_id?: string | null;
   diagnostics: SearchDiagnostics | null;
   duration_ms: number;
 }

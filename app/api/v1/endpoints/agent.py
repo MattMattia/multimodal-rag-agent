@@ -268,13 +268,17 @@ async def submit_feedback(request: FeedbackRequest, db: AsyncSession = Depends(g
         "created_at": datetime.now(UTC).isoformat(),
     }
     # Reasignar un dict nuevo para que SQLAlchemy detecte el cambio en la columna JSON
-    message.message_metadata = {**(message.message_metadata or {}), "feedback": feedback}
+    previous_metadata = dict(message.message_metadata or {})
+    message.message_metadata = {**previous_metadata, "feedback": feedback}
     await db.commit()
 
-    telemetry_service.record_score(
-        name="user_feedback",
-        value=request.rating,
-        trace_id=str(request.message_id),
-        comment=request.comment,
-    )
+    # El score solo se adjunta a la traza real del turno; sin trace_id persistido no se envía un score huérfano
+    trace_id = previous_metadata.get("trace_id")
+    if isinstance(trace_id, str) and trace_id:
+        telemetry_service.record_score(
+            name="user_feedback",
+            value=request.rating,
+            trace_id=trace_id,
+            comment=request.comment,
+        )
     return FeedbackResponse(message_id=request.message_id, rating=request.rating)

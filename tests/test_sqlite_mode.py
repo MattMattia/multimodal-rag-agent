@@ -91,6 +91,27 @@ async def test_unreachable_postgres_falls_back_to_sqlite(tmp_path, monkeypatch):
         database.bind_engine(previous)
 
 
+async def test_ddl_error_on_reachable_postgres_propagates_without_sqlite_fallback(monkeypatch):
+    """JD-2: only connection-level failures fall back; a DDL error on a live PostgreSQL fails startup loudly."""
+    from sqlalchemy.exc import ProgrammingError
+
+    previous = database.engine
+    monkeypatch.setattr(settings, "AUTO_FALLBACK_SQLITE", True)
+    database.bind_engine(database.build_engine(UNREACHABLE_PG))
+
+    async def _ddl_failure(_target):
+        raise ProgrammingError("CREATE INDEX ...", {}, Exception("syntax error at or near hnsw"))
+
+    monkeypatch.setattr(database, "create_schema", _ddl_failure)
+    try:
+        with pytest.raises(ProgrammingError):
+            await database.init_db()
+        assert database.get_active_db_dialect() == "postgresql"
+    finally:
+        await database.engine.dispose()
+        database.bind_engine(previous)
+
+
 async def test_unreachable_postgres_without_fallback_keeps_postgres_engine(monkeypatch):
     previous = database.engine
     monkeypatch.setattr(settings, "AUTO_FALLBACK_SQLITE", False)

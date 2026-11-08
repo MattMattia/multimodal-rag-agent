@@ -153,14 +153,38 @@ async def _auto_seed_if_empty() -> None:
         logger.warning("No se pudo sembrar el Golden Corpus automáticamente: %s", e)
 
 
+def _is_connection_error(exc: BaseException) -> bool:
+    """True si el fallo (o cualquier causa encadenada) es de conectividad: servidor inalcanzable o arrancando.
+
+    Errores de autenticación, catálogo inexistente o DDL indican mala configuración y no califican.
+    """
+    try:
+        from asyncpg.exceptions import CannotConnectNowError
+    except ImportError:  # pragma: no cover - asyncpg siempre está instalado con PostgreSQL
+        CannotConnectNowError = ()  # type: ignore[assignment,misc]
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, (OSError, TimeoutError, CannotConnectNowError)):
+            return True
+        current = getattr(current, "orig", None) or current.__cause__ or current.__context__
+    return False
+
+
 async def init_db() -> None:
     """Inicializa la base de datos (extensiones, tablas ORM, índices) y, si PostgreSQL no responde,
     continúa sobre SQLite cuando `AUTO_FALLBACK_SQLITE` está activo. Luego auto-siembra el Golden Corpus.
+
+    Un error que no sea de conectividad (p. ej. DDL fallido) sobre PostgreSQL se propaga y detiene el arranque.
     """
     try:
         await create_schema(engine)
         logger.info("Base de datos [%s], tablas e índices inicializados exitosamente.", get_active_db_dialect())
     except Exception as e:
+        if engine.dialect.name != "sqlite" and not _is_connection_error(e):
+            raise
         if engine.dialect.name == "sqlite" or not settings.AUTO_FALLBACK_SQLITE:
             logger.warning(
                 "No se pudo inicializar la base de datos automáticamente (¿el contenedor aún está iniciando?): %s",

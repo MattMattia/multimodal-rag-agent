@@ -224,9 +224,17 @@ async def test_feedback_validation_and_not_found(http, sessions):
     assert (await _metadata(message_id) or {}).get("feedback") is None
 
 
+async def _set_metadata(message_id, metadata):
+    async with AsyncSessionLocal() as db:
+        msg = (await db.execute(select(ChatMessage).where(ChatMessage.id == message_id))).scalar_one()
+        msg.message_metadata = metadata
+        await db.commit()
+
+
 @pytest.mark.asyncio
 async def test_feedback_sends_langfuse_score_only_when_telemetry_enabled(http, sessions):
     sid, (message_id,) = await _seed(sessions, [("assistant", "a", 0, [], [])])
+    await _set_metadata(message_id, {"trace_id": "trace-abc"})
     payload = {"session_id": str(sid), "message_id": str(message_id), "rating": 1, "comment": "genial"}
     client_mock = MagicMock()
     async with http as client:
@@ -241,3 +249,19 @@ async def test_feedback_sends_langfuse_score_only_when_telemetry_enabled(http, s
     assert kwargs["name"] == "user_feedback"
     assert kwargs["value"] == 1
     assert kwargs["comment"] == "genial"
+    assert kwargs["trace_id"] == "trace-abc"  # JD-4: the real turn trace, never the message id
+    metadata = await _metadata(message_id)
+    assert metadata["trace_id"] == "trace-abc" and metadata["feedback"]["rating"] == 1
+
+
+@pytest.mark.asyncio
+async def test_feedback_without_stored_trace_id_sends_no_orphan_score(http, sessions):
+    sid, (message_id,) = await _seed(sessions, [("assistant", "a", 0, [], [])])
+    payload = {"session_id": str(sid), "message_id": str(message_id), "rating": -1}
+    client_mock = MagicMock()
+    async with http as client:
+        with patch.object(telemetry_service, "_enabled", True), patch.object(telemetry_service, "_client", client_mock):
+            resp = await client.post("/api/v1/agent/feedback", json=payload)
+    assert resp.status_code == 200
+    client_mock.score.assert_not_called()
+    assert (await _metadata(message_id))["feedback"]["rating"] == -1

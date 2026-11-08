@@ -1,0 +1,46 @@
+# Build context of the API image (root Dockerfile). frontend/ and web/ have their own contexts.
+
+# Secrets and local configuration (compose mounts .env at runtime; it never ships in the image)
+.env
+.env.*
+!.env.example
+
+# VCS, editors and agent workspaces
+.git/
+.gitignore
+.github/
+.devcontainer/
+.vscode/
+.idea/
+.claude/
+.codegraph/
+.atl/
+odd/
+
+# Virtual environments and Python caches
+.venv/
+venv/
+ENV/
+env/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local databases and user data (the Dockerfile recreates the uploads/* folders)
+*.db
+*.sqlite3
+rag_standalone.db
+postgres_data/
+data/
+uploads/
+
+# Other images' build contexts
+web/
+
+# Root planning documents (README stays)
+*.md
+!README.md

@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -8,11 +9,12 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.telemetry import telemetry_service
+from app.core.telemetry import DummyTrace, telemetry_service
 from app.models.chat import ChatMessage
 from app.schemas.agent import AgentChatResponse, AgentOptions, CitationItem, ToolExecutionRecord
 from app.schemas.search import SearchDiagnostics
@@ -52,6 +54,21 @@ Reglas esenciales:
    - En tu mensaje de respuesta, explica brevemente qué contiene el reporte generado y confirma que está listo para descargar.
 6. Sé conciso, profesional, analítico y riguroso.
 """
+
+
+# Separador visible cuando Gemini falla tras haber transmitido tokens y el motor de contingencia continúa
+STREAM_FALLBACK_SEPARATOR = "\n\n[Se cambió al motor de contingencia]\n\n"
+
+
+def _trace_metadata(trace: Any) -> dict[str, Any]:
+    """`message_metadata` inicial con el id real de la traza de Langfuse (v2 `.id`, v3 `.trace_id`).
+
+    Sin telemetría activa (DummyTrace) no se guarda nada, para no adjuntar scores a trazas inexistentes.
+    """
+    if trace is None or isinstance(trace, DummyTrace):
+        return {}
+    trace_id = getattr(trace, "trace_id", None) or getattr(trace, "id", None)
+    return {"trace_id": trace_id} if isinstance(trace_id, str) and trace_id else {}
 
 
 def _split_preserving_whitespace(text: str) -> list[str]:
@@ -313,6 +330,7 @@ class AutonomousAgentService:
             content=chat_response.response,
             citations=citations_data,
             executed_tools=tools_data,
+            message_metadata=_trace_metadata(trace),
         )
         db.add(assistant_chat_record)
         await db.commit()
@@ -642,14 +660,21 @@ class AutonomousAgentService:
                     trace=trace,
                     options=options,
                 )
-                full_response = fb_response.response
-                collected_citations = fb_response.citations
-                executed_tools = fb_response.executed_tools
+                # Lo ya emitido no se reescribe: el contenido persistido es exactamente lo transmitido
+                fallback_text = fb_response.response
+                if full_response:
+                    fallback_text = f"{STREAM_FALLBACK_SEPARATOR}{fallback_text}"
+                    full_response += fallback_text
+                else:
+                    full_response = fallback_text
+                collected_citations = collected_citations + fb_response.citations
+                # Solo se reportan las herramientas del motor de contingencia (las previas ya se emitieron)
+                executed_tools = executed_tools + fb_response.executed_tools
 
-                for record in executed_tools:
+                for record in fb_response.executed_tools:
                     yield self._tool_start_event(record.tool_name, record.tool_input)
                     yield self._tool_end_event(record)
-                for chunk in _split_preserving_whitespace(full_response):
+                for chunk in _split_preserving_whitespace(fallback_text):
                     yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
 
         # 5. Emitir evento final de metadata
@@ -657,19 +682,8 @@ class AutonomousAgentService:
         citations_data = [_to_json_safe(c) for c in dedup_citations]
         tools_data = [_to_json_safe(t) for t in executed_tools]
 
-        assistant_message_id = uuid.uuid4()
-        metadata_event = {
-            "type": "metadata",
-            "message_id": str(assistant_message_id),
-            "citations": citations_data,
-            "executed_tools": tools_data,
-            "session_id": str(active_session_id),
-            "diagnostics": self._diagnostics_json(executed_tools),
-            "duration_ms": round((time.perf_counter() - turn_started) * 1000.0, 3),
-        }
-        yield f"data: {json.dumps(metadata_event)}\n\n"
-
-        # 6. Persistir el mensaje completo en PostgreSQL
+        # 6. Persistir el mensaje completo ANTES de anunciar su id: el cliente nunca recibe un id inexistente
+        assistant_message_id: uuid.UUID | None = uuid.uuid4()
         try:
             assistant_chat_record = ChatMessage(
                 id=assistant_message_id,
@@ -678,12 +692,27 @@ class AutonomousAgentService:
                 content=full_response or "Sin respuesta generada.",
                 citations=citations_data,
                 executed_tools=tools_data,
+                message_metadata=_trace_metadata(trace),
             )
             db.add(assistant_chat_record)
             await db.commit()
             logger.info("Respuesta del stream persistida exitosamente en PostgreSQL para session %s", active_session_id)
         except Exception as err:
             logger.error("Error al persistir mensaje de stream en PostgreSQL: %s", err, exc_info=True)
+            assistant_message_id = None
+            with contextlib.suppress(Exception):
+                await db.rollback()
+
+        metadata_event = {
+            "type": "metadata",
+            "message_id": str(assistant_message_id) if assistant_message_id else None,
+            "citations": citations_data,
+            "executed_tools": tools_data,
+            "session_id": str(active_session_id),
+            "diagnostics": self._diagnostics_json(executed_tools),
+            "duration_ms": round((time.perf_counter() - turn_started) * 1000.0, 3),
+        }
+        yield f"data: {json.dumps(metadata_event)}\n\n"
 
         # 7. Finalizar y sincronizar traza de telemetría
         try:
@@ -960,12 +989,21 @@ class AutonomousAgentService:
                 input={"query": search_query, "top_k": fallback_top_k},
             ) as tool_span:
                 tool_started = time.perf_counter()
-                search_res = await execute_search_knowledge_base(
-                    db=db, query=search_query, top_k=fallback_top_k, **search_kwargs
-                )
+                search_error: str | None = None
+                try:
+                    search_res = await execute_search_knowledge_base(
+                        db=db, query=search_query, top_k=fallback_top_k, **search_kwargs
+                    )
+                except HTTPException as search_exc:
+                    # p. ej. filter_document_id inexistente o fallido: resultado de error, nunca un stream roto
+                    search_error = str(search_exc.detail)
+                    search_res = {"context_text": "", "citations": [], "total_found": 0, "diagnostics": None}
                 search_ms = round((time.perf_counter() - tool_started) * 1000.0, 3)
                 if hasattr(tool_span, "update"):
                     tool_span.update(output={"total_found": search_res.get("total_found", 0)})
+
+            if search_error:
+                response_paragraphs.append(f"⚠️ No se pudo consultar la base de conocimientos: {search_error}\n")
 
             rag_context = search_res.get("context_text", "")
             raw_citations = search_res.get("citations", [])
@@ -985,7 +1023,9 @@ class AutonomousAgentService:
                 ToolExecutionRecord(
                     tool_name="search_knowledge_base",
                     tool_input={"query": search_query, "top_k": fallback_top_k},
-                    tool_output={"total_found": search_res.get("total_found", 0)},
+                    tool_output={"error": search_error}
+                    if search_error
+                    else {"total_found": search_res.get("total_found", 0)},
                     duration_ms=search_ms,
                     diagnostics=search_res.get("diagnostics"),
                 )
