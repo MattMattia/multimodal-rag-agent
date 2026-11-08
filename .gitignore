@@ -42,6 +42,7 @@ htmlcov/
 postgres_data/
 data/
 *.db
+rag_standalone.db
 *.sqlite3
 
 # Uploaded & Generated Media (preserve directory structure via .gitkeep)

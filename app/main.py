@@ -11,7 +11,6 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.security import require_api_key
-from app.models.chat import ensure_chat_schema
 
 # Configuración básica de logging
 logging.basicConfig(
@@ -30,12 +29,8 @@ async def lifespan(app: FastAPI):
     Path("uploads/images").mkdir(parents=True, exist_ok=True)
     Path("uploads/reports").mkdir(parents=True, exist_ok=True)
 
-    # Inicializar tablas y extensiones en PostgreSQL
+    # Inicializar tablas/extensiones (PostgreSQL o SQLite de respaldo) y auto-sembrar el Golden Corpus
     await init_db()
-    try:
-        await ensure_chat_schema()
-    except Exception as exc:  # la BD puede no estar lista aún; init_db ya registró el aviso
-        logger.warning("No se pudo asegurar el esquema de chat_messages: %s", exc)
 
     yield
     logger.info("Apagando %s...", settings.PROJECT_NAME)
@@ -58,6 +53,7 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origin_regex=settings.ALLOWED_ORIGIN_REGEX or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

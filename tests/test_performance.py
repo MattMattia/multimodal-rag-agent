@@ -423,6 +423,7 @@ async def test_hybrid_search_dedup_applies_without_reranker():
 # ---------------------------------------------------------------------------
 # PERF-05: pool configuration, get_db and history window
 # ---------------------------------------------------------------------------
+@pytest.mark.postgres_only
 def test_engine_pool_is_tuned():
     pool = database.engine.pool
     assert pool.size() == 10

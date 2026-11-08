@@ -185,6 +185,16 @@ MAX_UPLOAD_SIZE_MB=25           # Tamaño máximo de subida; por encima responde
 | `SEARCH_CANDIDATE_MULTIPLIER` | `4` | Candidatos recuperados por modo de búsqueda antes de la fusión: `min(top_k × multiplicador, 80)`. |
 | `RATE_LIMIT_ENABLED` | `true` | Activa el límite de peticiones por IP (ventana deslizante en memoria). Se desactiva automáticamente bajo `pytest`. |
 | `RATE_LIMIT_PER_MINUTE` | `60` | Peticiones máximas por IP y minuto; al superarlo la API responde `429` con cabecera `Retry-After`. `/health` y `/api/v1/health` están exentos. |
+| `AUTO_FALLBACK_SQLITE` | `true` | Si PostgreSQL no responde al arrancar, la API continúa sobre `sqlite+aiosqlite:///./rag_standalone.db` (modo Zero-Docker: sin pgvector, coseno exacto y BM25 en Python). También puedes fijar `DATABASE_URL=sqlite+aiosqlite:///./rag.db`. |
+| `AUTO_SEED_DEMO_CORPUS` | `true` | Al terminar `init_db()`, si `documents` está vacía se siembra el Golden Corpus (3 PDFs + 3 PNGs reales, sin llamar a Gemini). |
+| `PARENT_CHUNK_SIZE` / `PARENT_CHUNK_OVERLAP` | `1200` / `120` | Tamaño y solape de los chunks padre. |
+| `CHILD_CHUNK_SIZE` / `CHILD_CHUNK_OVERLAP` | `350` / `40` | Tamaño y solape de los chunks hijo (los únicos vectorizados). |
+| `PDF_IMAGE_DPI` / `PDF_MIN_IMAGE_DIM` | `150` / `40` | Resolución de las imágenes extraídas de PDFs y lado mínimo (pt) para no tratar un icono como imagen. |
+| `GEMINI_EMBEDDING_MODEL` / `EMBEDDING_DIMENSION` / `EMBEDDING_BATCH_SIZE` | `text-embedding-004` / `768` / `50` | Modelo, dimensión y tamaño de lote de embeddings (cambiar la dimensión exige recrear la columna `vector`). |
+| `RRF_K` | `60` | Constante de suavizado de Reciprocal Rank Fusion. |
+| `RERANK_TIMEOUT_SECONDS` / `RERANK_MAX_SNIPPET_CHARS` | `8.0` / `800` | Tiempo máximo del reranker y caracteres de cada fragmento enviados a Gemini. |
+| `AGENT_MAX_HISTORY_MESSAGES` / `AGENT_MAX_TURNS` / `AGENT_TEMPERATURE` | `20` / `4` / `0.2` | Mensajes previos enviados al LLM, iteraciones ReAct máximas y temperatura del agente. |
+| `ALLOWED_ORIGIN_REGEX` | vacío | Expresión regular opcional de orígenes CORS adicionales (p. ej. `https://.*\.vercel\.app`). |
 
 ### Paso 3: Desplegar la Infraestructura con Docker Compose
 ```bash
@@ -208,9 +218,9 @@ Una vez levantado:
 | `POST` | `/api/v1/documents/upload` | Ingesta de archivos PDF/Imágenes (procesamiento asíncrono) |
 | `GET` | `/api/v1/documents` | Listado de documentos indexados con estado y recuento de chunks |
 | `GET` | `/api/v1/documents/{id}` | Detalle de un documento y fragmentos generados |
-| `POST` | `/api/v1/search` | Búsqueda Híbrida (`query`, `limit`, filtros de metadata, reranking) |
+| `POST` | `/api/v1/search` | Búsqueda Híbrida (`query`, `top_k`, `mode`, `filter_document_id`, `rerank`); la respuesta incluye `diagnostics` (latencia por etapa: `embedding_ms`, `dense_ms`, `sparse_ms`, `rrf_fusion_ms`, `rerank_ms`, `total_ms`, candidatos y bloques únicos) |
 | `POST` | `/api/v1/agent/chat` | Interacción multi-turno con el Agente Autónomo ReAct |
-| `POST` | `/api/v1/agent/chat/stream` | Respuestas en Streaming en tiempo real (Server-Sent Events) |
+| `POST` | `/api/v1/agent/chat/stream` | Respuestas en Streaming en tiempo real (Server-Sent Events: `token`, `tool_end` con `duration_ms` y `diagnostics`, y `metadata` final con `diagnostics` y `duration_ms`). Ambos endpoints de chat aceptan `filter_document_id`, `search_mode`, `top_k`, `enable_rerank`, `temperature` y `max_turns` |
 | `GET` | `/api/v1/agent/sessions/{session_id}/history` | Historial persistido de una conversación |
 | `GET` | `/uploads/reports/{filename}` | Descarga de reportes PDF generados por el agente (exige `X-API-Key` si `API_KEY` está definida; solo sirve archivos dentro de `uploads/reports/`) |
 | `GET` | `/api/v1/reports/{filename}` | Reporte PDF generado por el agente (`Content-Disposition: inline`); mismo control de contención que la ruta legada |
@@ -220,6 +230,9 @@ Una vez levantado:
 | `DELETE` | `/api/v1/agent/sessions/{session_id}` | Elimina los mensajes de una sesión (`204`, o `404` si no existe) |
 | `GET` | `/api/v1/agent/sessions/{session_id}/export?format=markdown\|pdf` | Exporta la conversación con citas y herramientas ejecutadas |
 | `POST` | `/api/v1/agent/feedback` | Feedback `{session_id, message_id, rating: 1\|-1, comment}`; se guarda en `message_metadata` y se envía a Langfuse si está activo |
+| `POST` | `/api/v1/demo/seed` | Re-siembra idempotente del Golden Corpus (genera los PDFs/PNGs que falten; < 1 s sin conexión) |
+| `GET` | `/api/v1/demo/status` | `db_dialect`, `demo_seeded`, totales de documentos/chunks/imágenes, `gemini_configured`, `langfuse_enabled` y `active_models` |
+| `POST` | `/api/v1/demo/evaluate` | Evaluación RAG `dense` vs `sparse` vs `hybrid` (RRF + reranker): `hit_rate_at_k`, `mrr`, `ndcg_at_k`, `avg_latency_ms` y desglose por consulta (cuerpo opcional `{"top_k": 5}`; `409` si el corpus no está sembrado). Sin `GOOGLE_API_KEY` el benchmark usa embeddings simulados: la respuesta trae `embedding_mode: "mock"`, un `warning` y `semantic: false` en dense/hybrid (solo sparse es significativo) |
 
 ---
 
@@ -238,6 +251,12 @@ python -m venv .venv
 .venv/Scripts/pip install -r requirements.txt   # Linux/macOS: .venv/bin/pip
 .venv/Scripts/python -m pytest -v               # Linux/macOS: .venv/bin/python
 ```
+
+**Modo SQLite (sin Docker):** toda la suite también corre contra un archivo SQLite temporal:
+```bash
+TEST_DATABASE_URL=sqlite+aiosqlite:///./test_rag.db .venv/Scripts/python -m pytest -q   # PowerShell: $env:TEST_DATABASE_URL=...
+```
+Las pruebas marcadas con `@pytest.mark.postgres_only` (introspección del pool de asyncpg) se omiten en ese modo.
 
 `tests/conftest.py` elimina al final de la sesión los PDF generados en `uploads/reports/` durante las pruebas, conservando los existentes.
 

@@ -9,6 +9,7 @@ import pdfplumber
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.document import Document, DocumentChunk, DocumentImage
 from app.services.embedding import embedding_service
@@ -144,8 +145,8 @@ def extract_pdf_pages_sync(
                     bottom = img_meta.get("bottom", page.height)
 
                     # Filtrar pequeños iconos decorativos
-                    if (x1 - x0) > 40 and (bottom - top) > 40:
-                        img_obj = page.crop((x0, top, x1, bottom)).to_image(resolution=150)
+                    if (x1 - x0) > settings.PDF_MIN_IMAGE_DIM and (bottom - top) > settings.PDF_MIN_IMAGE_DIM:
+                        img_obj = page.crop((x0, top, x1, bottom)).to_image(resolution=settings.PDF_IMAGE_DPI)
                         saved_img_path = images_output_dir / f"{doc_id}_p{page_idx}_img{img_idx}.png"
                         img_obj.save(str(saved_img_path), format="PNG")
                         images.append(
@@ -186,11 +187,16 @@ class IngestionService:
 
     def __init__(
         self,
-        parent_chunk_size: int = 1200,
-        parent_chunk_overlap: int = 120,
-        child_chunk_size: int = 350,
-        child_chunk_overlap: int = 40,
+        parent_chunk_size: Optional[int] = None,
+        parent_chunk_overlap: Optional[int] = None,
+        child_chunk_size: Optional[int] = None,
+        child_chunk_overlap: Optional[int] = None,
     ):
+        # Sin argumentos explícitos se usan PARENT_/CHILD_CHUNK_* de Settings (1200/120 y 350/40 por defecto)
+        parent_chunk_size = settings.PARENT_CHUNK_SIZE if parent_chunk_size is None else parent_chunk_size
+        parent_chunk_overlap = settings.PARENT_CHUNK_OVERLAP if parent_chunk_overlap is None else parent_chunk_overlap
+        child_chunk_size = settings.CHILD_CHUNK_SIZE if child_chunk_size is None else child_chunk_size
+        child_chunk_overlap = settings.CHILD_CHUNK_OVERLAP if child_chunk_overlap is None else child_chunk_overlap
         self.parent_splitter = RecursiveCharacterTextSplitter(
             chunk_size=parent_chunk_size,
             chunk_overlap=parent_chunk_overlap,
@@ -254,7 +260,7 @@ class IngestionService:
                 if chunks_to_embed:
                     logger.info("Generando embeddings para %d fragmentos...", len(chunks_to_embed))
                     texts = [c.content for c in chunks_to_embed]
-                    vectors = await embedding_service.get_embeddings_batch(texts, batch_size=50)
+                    vectors = await embedding_service.get_embeddings_batch(texts)
                     for chunk, vector in zip(chunks_to_embed, vectors):
                         chunk.embedding = vector
 

@@ -22,11 +22,31 @@ class Settings(BaseSettings):
 
     # Base de Datos
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/rag_multimodal"
+    # Si PostgreSQL no responde en init_db(), continuar con SQLite local (modo Zero-Docker)
+    AUTO_FALLBACK_SQLITE: bool = True
+    # Sembrar el Golden Corpus al arrancar si la tabla `documents` está vacía
+    AUTO_SEED_DEMO_CORPUS: bool = True
 
     # Google AI / Gemini API
     GOOGLE_API_KEY: str = ""
     GEMINI_AGENT_MODEL: str = "gemini-1.5-pro"
     GEMINI_VISION_MODEL: str = "gemini-1.5-flash"
+    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
+    EMBEDDING_DIMENSION: int = 768
+    EMBEDDING_BATCH_SIZE: int = 50
+
+    # Ingesta: chunking jerárquico y extracción de imágenes de PDFs
+    PARENT_CHUNK_SIZE: int = 1200
+    PARENT_CHUNK_OVERLAP: int = 120
+    CHILD_CHUNK_SIZE: int = 350
+    CHILD_CHUNK_OVERLAP: int = 40
+    PDF_IMAGE_DPI: int = 150
+    PDF_MIN_IMAGE_DIM: int = 40  # lado mínimo (pt) para no tratar un icono como imagen
+
+    # Agente
+    AGENT_MAX_HISTORY_MESSAGES: int = 20
+    AGENT_MAX_TURNS: int = 4
+    AGENT_TEMPERATURE: float = 0.2
 
     # Langfuse / Observabilidad y Telemetría
     LANGFUSE_PUBLIC_KEY: str = ""
@@ -41,6 +61,9 @@ class Settings(BaseSettings):
 
     # Búsqueda
     SEARCH_CANDIDATE_MULTIPLIER: int = 4  # candidatos por modo = min(top_k * multiplicador, 80)
+    RRF_K: int = 60  # constante de suavizado de Reciprocal Rank Fusion
+    RERANK_TIMEOUT_SECONDS: float = 8.0
+    RERANK_MAX_SNIPPET_CHARS: int = 800
 
     # Rate limiting (ventana deslizante en memoria por IP)
     RATE_LIMIT_ENABLED: bool = True
@@ -48,6 +71,7 @@ class Settings(BaseSettings):
 
     # CORS
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000", "http://localhost:8501"]
+    ALLOWED_ORIGIN_REGEX: str = ""  # regex opcional adicional (p. ej. previews de Vercel); vacío = desactivado
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod

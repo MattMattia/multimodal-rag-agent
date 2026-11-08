@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 import uuid
 
@@ -12,15 +13,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.telemetry import telemetry_service
 from app.models.chat import ChatMessage
-from app.schemas.agent import AgentChatResponse, CitationItem, ToolExecutionRecord
+from app.schemas.agent import AgentChatResponse, AgentOptions, CitationItem, ToolExecutionRecord
+from app.schemas.search import SearchDiagnostics
 from app.tools.pdf_generator import execute_generate_report_pdf
 from app.tools.rag_tool import execute_search_knowledge_base
 from app.tools.webhook_tool import execute_dispatch_webhook
 
 logger = logging.getLogger(__name__)
 
-# Máximo de mensajes previos enviados a Gemini (la BD conserva el historial completo)
-MAX_HISTORY_MESSAGES = 20
+# Valores por defecto del agente (historial enviado a Gemini, iteraciones ReAct y temperatura) viven en Settings:
+# AGENT_MAX_HISTORY_MESSAGES, AGENT_MAX_TURNS, AGENT_TEMPERATURE. La BD conserva siempre el historial completo.
 
 # Intentar importar el SDK moderno de Google GenAI
 _USE_MODERN_GENAI = False
@@ -173,13 +175,51 @@ class AutonomousAgentService:
             return self._initialized
         return False
 
+    @staticmethod
+    def _resolve_temperature(options: Optional[AgentOptions]) -> float:
+        if options is not None and options.temperature is not None:
+            return options.temperature
+        return settings.AGENT_TEMPERATURE
+
+    @staticmethod
+    def _resolve_max_turns(options: Optional[AgentOptions]) -> int:
+        if options is not None and options.max_turns is not None:
+            return options.max_turns
+        return settings.AGENT_MAX_TURNS
+
+    @staticmethod
+    def _last_diagnostics(tools: List[ToolExecutionRecord]) -> Optional[SearchDiagnostics]:
+        """Rayos X de la última búsqueda RAG ejecutada en el turno (None si no hubo ninguna)."""
+        for record in reversed(tools):
+            if record.diagnostics is not None:
+                return record.diagnostics
+        return None
+
+    @classmethod
+    def _diagnostics_json(cls, tools: List[ToolExecutionRecord]) -> Optional[Dict[str, Any]]:
+        last = cls._last_diagnostics(tools)
+        return last.model_dump() if last is not None else None
+
+    @staticmethod
+    def _tool_end_event(record: ToolExecutionRecord) -> str:
+        """Evento SSE `tool_end` con la duración de la herramienta y, si fue una búsqueda, sus diagnósticos."""
+        event = {
+            "type": "tool_end",
+            "tool_name": record.tool_name,
+            "duration_ms": record.duration_ms,
+            "diagnostics": record.diagnostics.model_dump() if record.diagnostics else None,
+        }
+        return f"data: {json.dumps(event)}\n\n"
+
     async def execute_turn(
         self,
         db: AsyncSession,
         user_message: str,
         session_id: Optional[uuid.UUID] = None,
+        options: Optional[AgentOptions] = None,
     ) -> AgentChatResponse:
         """Ejecuta un turno completo de interacción con el agente autónomo y persiste la memoria en PostgreSQL."""
+        turn_started = time.perf_counter()
         active_session_id = session_id or uuid.uuid4()
 
         # Iniciar traza raíz de telemetría (Langfuse)
@@ -220,6 +260,7 @@ class AutonomousAgentService:
                 session_id=active_session_id,
                 prior_messages=prior_messages,
                 trace=trace,
+                options=options,
             )
         else:
             try:
@@ -229,6 +270,7 @@ class AutonomousAgentService:
                     session_id=active_session_id,
                     prior_messages=prior_messages,
                     trace=trace,
+                    options=options,
                 )
             except Exception as e:
                 logger.error("Error crítico al invocar la API de Gemini: %s", e, exc_info=True)
@@ -243,6 +285,7 @@ class AutonomousAgentService:
                     prior_messages=prior_messages,
                     api_error_notice=error_prefix,
                     trace=trace,
+                    options=options,
                 )
 
         # 4. Persistir la respuesta final del asistente en PostgreSQL
@@ -266,6 +309,9 @@ class AutonomousAgentService:
         )
         db.add(assistant_chat_record)
         await db.commit()
+
+        chat_response.diagnostics = self._last_diagnostics(chat_response.executed_tools)
+        chat_response.duration_ms = round((time.perf_counter() - turn_started) * 1000.0, 3)
 
         # 5. Actualizar traza en Langfuse y registrar métricas de turno
         try:
@@ -390,8 +436,10 @@ class AutonomousAgentService:
         db: AsyncSession,
         user_message: str,
         session_id: Optional[uuid.UUID] = None,
+        options: Optional[AgentOptions] = None,
     ) -> AsyncGenerator[str, None]:
-        """Ejecuta el turno del agente en streaming SSE estructurado (tokens y metadata), persistiendo en PostgreSQL."""
+        """Ejecuta el turno del agente en streaming SSE estructurado (tool_end, tokens y metadata), persistiendo en BD."""
+        turn_started = time.perf_counter()
         active_session_id = session_id or uuid.uuid4()
 
         # Iniciar traza raíz de telemetría (Langfuse)
@@ -441,25 +489,29 @@ class AutonomousAgentService:
                 session_id=active_session_id,
                 prior_messages=prior_messages,
                 trace=trace,
+                options=options,
             )
             full_response = fb_response.response
             collected_citations = fb_response.citations
             executed_tools = fb_response.executed_tools
 
+            for record in executed_tools:
+                yield self._tool_end_event(record)
             for chunk in _split_preserving_whitespace(full_response):
                 yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
         else:
             try:
+                temperature = self._resolve_temperature(options)
                 tool_defs = _get_tool_declarations()
                 gemini_tools = [types.Tool(function_declarations=tool_defs)]
                 config = types.GenerateContentConfig(
                     system_instruction=SYSTEM_INSTRUCTION,
                     tools=gemini_tools,
-                    temperature=0.2,
+                    temperature=temperature,
                 )
 
                 contents: List[types.Content] = []
-                for msg in prior_messages[-MAX_HISTORY_MESSAGES:]:
+                for msg in prior_messages[-settings.AGENT_MAX_HISTORY_MESSAGES:]:
                     if msg.role == "user":
                         contents.append(types.Content(role="user", parts=[types.Part.from_text(text=msg.content)]))
                     elif msg.role == "assistant":
@@ -467,7 +519,7 @@ class AutonomousAgentService:
 
                 contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_message)]))
 
-                max_turns = 4
+                max_turns = self._resolve_max_turns(options)
                 active_model = self.model_name
                 final_text_needed = True
 
@@ -513,22 +565,27 @@ class AutonomousAgentService:
                             span_type="tool",
                             input=tool_args,
                         ) as tool_span:
+                            tool_meta: Dict[str, Any] = {}
+                            tool_started = time.perf_counter()
                             tool_result, tool_citations = await self._dispatch_tool_call(
-                                db=db, tool_name=tool_name, tool_args=tool_args
+                                db=db, tool_name=tool_name, tool_args=tool_args, options=options, tool_meta=tool_meta
                             )
+                            tool_ms = round((time.perf_counter() - tool_started) * 1000.0, 3)
                             if hasattr(tool_span, "update"):
                                 tool_span.update(output=tool_result)
 
                         if tool_citations:
                             collected_citations.extend(tool_citations)
 
-                        executed_tools.append(
-                            ToolExecutionRecord(
-                                tool_name=tool_name,
-                                tool_input=tool_args,
-                                tool_output=tool_result,
-                            )
+                        record = ToolExecutionRecord(
+                            tool_name=tool_name,
+                            tool_input=tool_args,
+                            tool_output=tool_result,
+                            duration_ms=tool_ms,
+                            diagnostics=tool_meta.get("diagnostics"),
                         )
+                        executed_tools.append(record)
+                        yield self._tool_end_event(record)
 
                         tool_response_parts.append(
                             types.Part.from_function_response(
@@ -542,7 +599,7 @@ class AutonomousAgentService:
                 if final_text_needed:
                     stream_config = types.GenerateContentConfig(
                         system_instruction=SYSTEM_INSTRUCTION,
-                        temperature=0.2,
+                        temperature=temperature,
                     )
                     async for token in self._call_gemini_stream_with_fallback(
                         contents=contents,
@@ -574,11 +631,14 @@ class AutonomousAgentService:
                     prior_messages=prior_messages,
                     api_error_notice=error_prefix,
                     trace=trace,
+                    options=options,
                 )
                 full_response = fb_response.response
                 collected_citations = fb_response.citations
                 executed_tools = fb_response.executed_tools
 
+                for record in executed_tools:
+                    yield self._tool_end_event(record)
                 for chunk in _split_preserving_whitespace(full_response):
                     yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
 
@@ -592,6 +652,8 @@ class AutonomousAgentService:
             "citations": citations_data,
             "executed_tools": tools_data,
             "session_id": str(active_session_id),
+            "diagnostics": self._diagnostics_json(executed_tools),
+            "duration_ms": round((time.perf_counter() - turn_started) * 1000.0, 3),
         }
         yield f"data: {json.dumps(metadata_event)}\n\n"
 
@@ -634,24 +696,26 @@ class AutonomousAgentService:
         session_id: uuid.UUID,
         prior_messages: List[ChatMessage],
         trace: Optional[Any] = None,
+        options: Optional[AgentOptions] = None,
     ) -> AgentChatResponse:
         """Ejecuta el ciclo ReAct y Function Calling con el modelo Gemini configurado."""
         executed_tools: List[ToolExecutionRecord] = []
         collected_citations: List[CitationItem] = []
 
         # 1. Preparar configuración de Function Calling
+        temperature = self._resolve_temperature(options)
         tool_defs = _get_tool_declarations()
         gemini_tools = [types.Tool(function_declarations=tool_defs)]
 
         config = types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
             tools=gemini_tools,
-            temperature=0.2,
+            temperature=temperature,
         )
 
         # 2. Historial de conversación multi-turno para el modelo
         contents: List[types.Content] = []
-        for msg in prior_messages[-MAX_HISTORY_MESSAGES:]:
+        for msg in prior_messages[-settings.AGENT_MAX_HISTORY_MESSAGES:]:
             if msg.role == "user":
                 contents.append(
                     types.Content(
@@ -676,7 +740,7 @@ class AutonomousAgentService:
 
         # 3. Ciclo de Razonamiento y Acción (ReAct Loop) - Máximo 4 iteraciones
         final_answer = ""
-        max_turns = 4
+        max_turns = self._resolve_max_turns(options)
         active_model = self.model_name
 
         for turn in range(max_turns):
@@ -722,9 +786,12 @@ class AutonomousAgentService:
                     span_type="tool",
                     input=tool_args,
                 ) as tool_span:
+                    tool_meta: Dict[str, Any] = {}
+                    tool_started = time.perf_counter()
                     tool_result, tool_citations = await self._dispatch_tool_call(
-                        db=db, tool_name=tool_name, tool_args=tool_args
+                        db=db, tool_name=tool_name, tool_args=tool_args, options=options, tool_meta=tool_meta
                     )
+                    tool_ms = round((time.perf_counter() - tool_started) * 1000.0, 3)
                     if hasattr(tool_span, "update"):
                         tool_span.update(output=tool_result)
 
@@ -736,6 +803,8 @@ class AutonomousAgentService:
                         tool_name=tool_name,
                         tool_input=tool_args,
                         tool_output=tool_result,
+                        duration_ms=tool_ms,
+                        diagnostics=tool_meta.get("diagnostics"),
                     )
                 )
 
@@ -765,15 +834,30 @@ class AutonomousAgentService:
         db: AsyncSession,
         tool_name: str,
         tool_args: Dict[str, Any],
+        options: Optional[AgentOptions] = None,
+        tool_meta: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Any, List[CitationItem]]:
-        """Despacha la ejecución de una herramienta específica y extrae citas si aplica."""
+        """Despacha la ejecución de una herramienta específica y extrae citas si aplica.
+
+        `tool_meta` es un parámetro de salida opcional: se rellena con `diagnostics` (rayos X) de las búsquedas RAG.
+        """
         citations: List[CitationItem] = []
 
         try:
             if tool_name == "search_knowledge_base":
                 query = tool_args.get("query", "")
-                top_k = int(tool_args.get("top_k", 5))
-                result = await execute_search_knowledge_base(db=db, query=query, top_k=top_k)
+                default_top_k = options.top_k if options is not None and options.top_k else 5
+                top_k = int(tool_args.get("top_k", default_top_k))
+                search_kwargs: Dict[str, Any] = {}
+                if options is not None:
+                    search_kwargs = {
+                        "mode": options.search_mode,
+                        "filter_document_id": options.filter_document_id,
+                        "rerank": options.enable_rerank,
+                    }
+                result = await execute_search_knowledge_base(db=db, query=query, top_k=top_k, **search_kwargs)
+                if tool_meta is not None:
+                    tool_meta["diagnostics"] = result.get("diagnostics")
 
                 for c in result.get("citations", []):
                     citations.append(
@@ -820,6 +904,7 @@ class AutonomousAgentService:
         prior_messages: Optional[List[ChatMessage]] = None,
         api_error_notice: str = "",
         trace: Optional[Any] = None,
+        options: Optional[AgentOptions] = None,
     ) -> AgentChatResponse:
         """Modo determinístico de respaldo para desarrollo local y pruebas unitarias sin API key activa."""
         msg_lower = user_message.lower()
@@ -846,13 +931,26 @@ class AutonomousAgentService:
 
         rag_context = ""
         if needs_search:
+            # top_k: el valor explícito de la solicitud; si no se envió, el 3 histórico del modo de respaldo
+            fallback_top_k = options.top_k if options is not None and options.top_k else 3
+            search_kwargs: Dict[str, Any] = {}
+            if options is not None:
+                search_kwargs = {
+                    "mode": options.search_mode,
+                    "filter_document_id": options.filter_document_id,
+                    "rerank": options.enable_rerank,
+                }
             with telemetry_service.span(
                 parent=trace,
                 name="tool:search_knowledge_base",
                 span_type="tool",
-                input={"query": search_query, "top_k": 3},
+                input={"query": search_query, "top_k": fallback_top_k},
             ) as tool_span:
-                search_res = await execute_search_knowledge_base(db=db, query=search_query, top_k=3)
+                tool_started = time.perf_counter()
+                search_res = await execute_search_knowledge_base(
+                    db=db, query=search_query, top_k=fallback_top_k, **search_kwargs
+                )
+                search_ms = round((time.perf_counter() - tool_started) * 1000.0, 3)
                 if hasattr(tool_span, "update"):
                     tool_span.update(output={"total_found": search_res.get("total_found", 0)})
 
@@ -873,8 +971,10 @@ class AutonomousAgentService:
             executed_tools.append(
                 ToolExecutionRecord(
                     tool_name="search_knowledge_base",
-                    tool_input={"query": search_query, "top_k": 3},
+                    tool_input={"query": search_query, "top_k": fallback_top_k},
                     tool_output={"total_found": search_res.get("total_found", 0)},
+                    duration_ms=search_ms,
+                    diagnostics=search_res.get("diagnostics"),
                 )
             )
 

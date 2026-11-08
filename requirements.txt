@@ -9,6 +9,7 @@ python-multipart>=0.0.9
 # Base de Datos y Vectores
 sqlalchemy>=2.0.30
 asyncpg>=0.29.0
+aiosqlite>=0.20.0  # modo SQLite Zero-Docker (fallback automático)
 pgvector>=0.2.5
 greenlet>=3.0.3
 

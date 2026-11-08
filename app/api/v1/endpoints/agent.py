@@ -41,13 +41,16 @@ async def chat_with_agent_stream(
 
     Emite eventos estructurados:
     - `data: {"type": "token", "content": "..."}\\n\\n` para cada fragmento de texto sintetizado.
-    - `data: {"type": "metadata", "citations": [...], "executed_tools": [...], "session_id": "..."}\\n\\n` al concluir la respuesta.
+    - `data: {"type": "tool_end", "tool_name": "...", "duration_ms": 12.3, "diagnostics": {...}|null}\\n\\n` al terminar cada herramienta
+      (`diagnostics` = rayos X de latencia de la búsqueda RAG, `null` para otras herramientas).
+    - `data: {"type": "metadata", "citations": [...], "executed_tools": [...], "session_id": "...", "diagnostics": {...}|null, "duration_ms": 123.4}\\n\\n` al concluir la respuesta.
     """
     return StreamingResponse(
         autonomous_agent_service.execute_turn_stream(
             db=db,
             user_message=request.message,
             session_id=request.session_id,
+            options=request.to_options(),
         ),
         media_type="text/event-stream",
         headers={
@@ -81,6 +84,7 @@ async def chat_with_agent(
             db=db,
             user_message=request.message,
             session_id=request.session_id,
+            options=request.to_options(),
         )
         return response
     except HTTPException:

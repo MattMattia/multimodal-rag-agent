@@ -16,6 +16,7 @@ async def execute_search_knowledge_base(
     top_k: int = 5,
     mode: str = "hybrid",
     filter_document_id: Optional[uuid.UUID] = None,
+    rerank: bool = True,
 ) -> Dict[str, Any]:
     """Ejecuta la búsqueda híbrida en el vector store y extrae contexto y citas para el Agente IA.
 
@@ -25,9 +26,10 @@ async def execute_search_knowledge_base(
         top_k: Cantidad de fragmentos a recuperar.
         mode: Modo ('hybrid', 'dense' o 'sparse').
         filter_document_id: ID opcional de documento para restringir la búsqueda.
+        rerank: Si es True aplica reranking semántico tras la fusión.
 
     Returns:
-        Diccionario con context_text (texto formateado para el prompt), citations y total_found.
+        Diccionario con context_text (texto formateado para el prompt), citations, total_found y diagnostics.
     """
     logger.info("Herramienta RAG ejecutando búsqueda para: '%s' (modo: %s)", query, mode)
 
@@ -37,7 +39,7 @@ async def execute_search_knowledge_base(
         mode=mode,
         filter_document_id=filter_document_id,
         include_parent=True,
-        rerank=True,
+        rerank=rerank,
     )
 
     response = await hybrid_search_service.search(db=db, request=request)
@@ -74,5 +76,6 @@ async def execute_search_knowledge_base(
         "context_text": context_text,
         "citations": citations,
         "total_found": len(response.results),
+        "diagnostics": response.diagnostics.model_dump() if response.diagnostics else None,
     }
 

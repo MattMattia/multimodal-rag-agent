@@ -61,6 +61,20 @@ class SearchResultItem(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class SearchDiagnostics(BaseModel):
+    """Rayos X de latencia: tiempo (ms) de cada etapa de `HybridSearchService.search`."""
+
+    db_dialect: str = Field(..., description="Dialecto de la base de datos activa: 'postgresql' o 'sqlite'")
+    embedding_ms: float = Field(..., description="Generación del embedding de la consulta (0 si el modo es 'sparse')")
+    dense_ms: float = Field(..., description="Recuperación vectorial densa (0 si el modo es 'sparse')")
+    sparse_ms: float = Field(..., description="Recuperación léxica esparsa (0 si el modo es 'dense')")
+    rrf_fusion_ms: float = Field(..., description="Fusión RRF y deduplicación por bloque padre")
+    rerank_ms: float = Field(..., description="Reranking semántico (0 si está desactivado)")
+    total_ms: float = Field(..., description="Duración total de la búsqueda")
+    raw_candidates_count: int = Field(..., description="Candidatos tras la fusión, antes de deduplicar")
+    deduped_blocks_count: int = Field(..., description="Bloques únicos tras deduplicar por fragmento padre")
+
+
 class SearchResponse(BaseModel):
     """Respuesta consolidada de búsqueda híbrida."""
 
@@ -68,3 +82,6 @@ class SearchResponse(BaseModel):
     mode: str
     total_results: int
     results: List[SearchResultItem]
+    diagnostics: Optional[SearchDiagnostics] = Field(
+        default=None, description="Latencia por etapa (rayos X) de esta búsqueda"
+    )

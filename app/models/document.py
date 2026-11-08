@@ -9,6 +9,7 @@ from sqlalchemy.types import JSON
 
 from pgvector.sqlalchemy import Vector
 
+from app.core.config import settings
 from app.core.database import Base
 
 
@@ -64,7 +65,10 @@ class DocumentChunk(Base):
         String(50), default="text", nullable=False, index=True
     )  # 'text', 'table', 'image_description'
     page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    embedding: Mapped[Optional[List[float]]] = mapped_column(Vector(768), nullable=True)
+    # vector(N) nativo (con índice HNSW) en PostgreSQL; array JSON de floats en SQLite
+    embedding: Mapped[Optional[List[float]]] = mapped_column(
+        JSON(none_as_null=True).with_variant(Vector(settings.EMBEDDING_DIMENSION), "postgresql"), nullable=True
+    )
     chunk_metadata: Mapped[Dict[str, Any]] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"), default=dict, nullable=False
     )

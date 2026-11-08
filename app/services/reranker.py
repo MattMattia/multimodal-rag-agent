@@ -97,7 +97,7 @@ class RerankerService:
                 # Ejecutar con timeout de 8 segundos para evitar bloqueos
                 result = await asyncio.wait_for(
                     self._score_with_gemini(query=query, candidates=candidates, top_n=top_n),
-                    timeout=8.0,
+                    timeout=settings.RERANK_TIMEOUT_SECONDS,
                 )
                 rerank_span.update(output={"returned_count": len(result), "mode": "gemini_scoring"})
                 return result
@@ -120,7 +120,7 @@ class RerankerService:
         """Envía los fragmentos a Gemini para calificar su relevancia semántica de 0.0 a 1.0."""
         chunks_text = []
         for idx, c in enumerate(candidates):
-            content_snippet = (c.get("content") or "")[:800].strip().replace("\n", " ")
+            content_snippet = (c.get("content") or "")[: settings.RERANK_MAX_SNIPPET_CHARS].strip().replace("\n", " ")
             doc_name = c.get("document_name", "documento")
             chunks_text.append(f"[{idx}] ({doc_name}): {content_snippet}")
 

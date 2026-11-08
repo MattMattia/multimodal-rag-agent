@@ -1,15 +1,19 @@
 import logging
-from typing import Any, Dict, List, Optional
+import math
+import time
+from typing import Any, Dict, List, Optional, Sequence
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, literal_column, or_, select
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import func, literal_column, or_, select, type_coerce
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.telemetry import telemetry_service
 from app.models.document import Document, DocumentChunk
-from app.schemas.search import SearchRequest, SearchResponse, SearchResultItem
+from app.schemas.search import SearchDiagnostics, SearchRequest, SearchResponse, SearchResultItem
+from app.services import lexical
 from app.services.embedding import embedding_service
 from app.services.reranker import reranker_service
 
@@ -25,8 +29,25 @@ class HybridSearchService:
     con búsqueda léxica esparsa (Full-Text Search) mediante Reciprocal Rank Fusion (RRF).
     """
 
-    def __init__(self, rrf_k: int = 60):
-        self.rrf_k = rrf_k  # Constante de suavizado estándar RRF
+    def __init__(self, rrf_k: Optional[int] = None):
+        self._rrf_k = rrf_k  # None = usar settings.RRF_K (constante de suavizado estándar RRF)
+
+    @property
+    def rrf_k(self) -> int:
+        return self._rrf_k if self._rrf_k is not None else settings.RRF_K
+
+    @rrf_k.setter
+    def rrf_k(self, value: Optional[int]) -> None:
+        self._rrf_k = value
+
+    @staticmethod
+    def _dialect_name(db: AsyncSession) -> str:
+        """Dialecto de la sesión ('sqlite' o 'postgresql'); una sesión sin dialecto real (dobles de prueba) cuenta como PostgreSQL."""
+        try:
+            name = db.get_bind().dialect.name
+        except Exception:
+            name = None
+        return name if isinstance(name, str) else "postgresql"
 
     async def search(self, db: AsyncSession, request: SearchRequest) -> SearchResponse:
         """Ejecuta la búsqueda según el modo seleccionado ('hybrid', 'dense' o 'sparse')."""
@@ -67,51 +88,67 @@ class HybridSearchService:
             input={"query": query_text, "mode": request.mode, "top_k": top_k},
             metadata={"filter_document_id": str(doc_filter) if doc_filter else None},
         ) as search_span:
+            # Rayos X de latencia: cada etapa se mide con time.perf_counter()
+            total_started = time.perf_counter()
+            embedding_ms = dense_ms = sparse_ms = rerank_ms = 0.0
+            dialect = self._dialect_name(db)
+
             # Recuperar pool extendido para que RRF tenga suficiente solapamiento
             retrieval_limit = min(top_k * settings.SEARCH_CANDIDATE_MULTIPLIER, MAX_RETRIEVAL_CANDIDATES)
 
             dense_items: List[Dict[str, Any]] = []
             sparse_items: List[Dict[str, Any]] = []
 
-            # 3. Búsqueda densa (Vectorial)
+            # 3. Búsqueda densa (Vectorial): pgvector en PostgreSQL, coseno exacto en Python en SQLite
             if request.mode in ("hybrid", "dense"):
+                started = time.perf_counter()
                 query_vector = await embedding_service.get_embedding(query_text)
+                embedding_ms = (time.perf_counter() - started) * 1000.0
+
+                started = time.perf_counter()
                 dense_items = await self._dense_retrieval(
                     db=db,
                     query_vector=query_vector,
                     limit=retrieval_limit,
                     filter_document_id=doc_filter,
                 )
+                dense_ms = (time.perf_counter() - started) * 1000.0
 
-            # 4. Búsqueda esparsa (Léxica Full-Text)
+            # 4. Búsqueda esparsa (Léxica): Full-Text Search en PostgreSQL, BM25 en Python en SQLite
             if request.mode in ("hybrid", "sparse"):
+                started = time.perf_counter()
                 sparse_items = await self._sparse_retrieval(
                     db=db,
                     query_text=query_text,
                     limit=retrieval_limit,
                     filter_document_id=doc_filter,
                 )
+                sparse_ms = (time.perf_counter() - started) * 1000.0
 
-            # 5. Fusión y ranking según modo
+            # 5. Fusión y ranking según modo; un único resultado por bloque padre (el de mayor puntaje)
+            started = time.perf_counter()
             if request.mode == "dense":
                 fused_candidates = dense_items
             elif request.mode == "sparse":
                 fused_candidates = sparse_items
             else:  # hybrid
                 fused_candidates = self._apply_rrf(dense_items, sparse_items)
-
-            # Un único resultado por bloque padre (el de mayor puntaje) para maximizar diversidad
+            raw_candidates_count = len(fused_candidates)
             fused_candidates = self._dedupe_by_parent_block(fused_candidates)
+            rrf_fusion_ms = (time.perf_counter() - started) * 1000.0
+            deduped_blocks_count = len(fused_candidates)
 
             # Si se solicita reranking semántico (por defecto True):
             # Tomar una ventana más amplia de candidatos (top_k * 3) y pasarlos por RerankerService
             if getattr(request, "rerank", True) and fused_candidates:
                 candidate_window = fused_candidates[: top_k * 3]
+                started = time.perf_counter()
                 final_ranked = await reranker_service.rerank(
                     query=query_text,
                     candidates=candidate_window,
                     top_n=top_k,
                 )
+                rerank_ms = (time.perf_counter() - started) * 1000.0
             else:
                 final_ranked = fused_candidates[:top_k]
 
@@ -140,14 +177,33 @@ class HybridSearchService:
                     )
                 )
 
+            diagnostics = SearchDiagnostics(
+                db_dialect=dialect,
+                embedding_ms=round(embedding_ms, 3),
+                dense_ms=round(dense_ms, 3),
+                sparse_ms=round(sparse_ms, 3),
+                rrf_fusion_ms=round(rrf_fusion_ms, 3),
+                rerank_ms=round(rerank_ms, 3),
+                total_ms=round((time.perf_counter() - total_started) * 1000.0, 3),
+                raw_candidates_count=raw_candidates_count,
+                deduped_blocks_count=deduped_blocks_count,
+            )
+
             if hasattr(search_span, "update"):
-                search_span.update(output={"total_results": len(results), "mode": request.mode})
+                search_span.update(
+                    output={
+                        "total_results": len(results),
+                        "mode": request.mode,
+                        "diagnostics": diagnostics.model_dump(),
+                    }
+                )
 
         return SearchResponse(
             query=request.query,
             mode=request.mode,
             total_results=len(results),
             results=results,
+            diagnostics=diagnostics,
         )
 
     async def _dense_retrieval(
@@ -157,8 +213,13 @@ class HybridSearchService:
         limit: int,
         filter_document_id: Optional[uuid.UUID],
     ) -> List[Dict[str, Any]]:
-        """Búsqueda vectorial densa por distancia de coseno en pgvector."""
-        distance_expr = DocumentChunk.embedding.cosine_distance(query_vector)
+        """Búsqueda vectorial densa: coseno en pgvector (PostgreSQL) o exacto en Python (SQLite)."""
+        if self._dialect_name(db) == "sqlite":
+            return await self._dense_retrieval_sqlite(db, query_vector, limit, filter_document_id)
+        # La columna es JSON con variante vector(N) en PostgreSQL: type_coerce expone los operadores de pgvector
+        distance_expr = type_coerce(DocumentChunk.embedding, Vector(settings.EMBEDDING_DIMENSION)).cosine_distance(
+            query_vector
+        )
 
         stmt = (
             select(DocumentChunk, Document.filename, distance_expr.label("distance"))
@@ -202,7 +263,9 @@ class HybridSearchService:
         limit: int,
         filter_document_id: Optional[uuid.UUID],
     ) -> List[Dict[str, Any]]:
-        """Búsqueda léxica esparsa con soporte bilingüe (español e inglés) y fallback por tokens."""
+        """Búsqueda léxica esparsa bilingüe: Full-Text Search (PostgreSQL) o BM25 en Python (SQLite)."""
+        if self._dialect_name(db) == "sqlite":
+            return await self._sparse_retrieval_sqlite(db, query_text, limit, filter_document_id)
         # Configuración de diccionarios en español e inglés
         # La configuración se emite como literal SQL (no parámetro) para que la expresión
         # to_tsvector('<cfg>', content) coincida exactamente con los índices GIN.
@@ -274,6 +337,89 @@ class HybridSearchService:
             )
 
         return ranked
+
+    @staticmethod
+    def _row_to_item(row: Any, score: float) -> Dict[str, Any]:
+        return {
+            "chunk_id": row.id,
+            "document_id": row.document_id,
+            "document_name": row.filename,
+            "content": row.content,
+            "parent_id": row.parent_id,
+            "chunk_type": row.chunk_type,
+            "page_number": row.page_number,
+            "score": score,
+            "metadata": row.chunk_metadata,
+        }
+
+    @staticmethod
+    def _chunk_columns() -> Sequence[Any]:
+        return (
+            DocumentChunk.id,
+            DocumentChunk.document_id,
+            DocumentChunk.content,
+            DocumentChunk.parent_id,
+            DocumentChunk.chunk_type,
+            DocumentChunk.page_number,
+            DocumentChunk.chunk_metadata,
+            Document.filename,
+        )
+
+    async def _dense_retrieval_sqlite(
+        self,
+        db: AsyncSession,
+        query_vector: List[float],
+        limit: int,
+        filter_document_id: Optional[uuid.UUID],
+    ) -> List[Dict[str, Any]]:
+        """Búsqueda densa en SQLite: similitud de coseno exacta en Python sobre los chunks hoja con embedding."""
+        stmt = (
+            select(*self._chunk_columns(), DocumentChunk.embedding)
+            .join(Document, DocumentChunk.document_id == Document.id)
+            .where(DocumentChunk.embedding.is_not(None))
+        )
+        if filter_document_id:
+            stmt = stmt.where(DocumentChunk.document_id == filter_document_id)
+
+        query_norm = math.sqrt(sum(x * x for x in query_vector))
+        scored = []
+        for row in (await db.execute(stmt)).all():
+            vector = row.embedding
+            if not vector or len(vector) != len(query_vector) or query_norm == 0.0:
+                continue
+            norm = math.sqrt(sum(x * x for x in vector))
+            if norm == 0.0:
+                continue
+            cosine = sum(a * b for a, b in zip(query_vector, vector)) / (query_norm * norm)
+            scored.append((max(0.0, min(1.0, cosine)), row))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [self._row_to_item(row, score) for score, row in scored[:limit]]
+
+    async def _sparse_retrieval_sqlite(
+        self,
+        db: AsyncSession,
+        query_text: str,
+        limit: int,
+        filter_document_id: Optional[uuid.UUID],
+    ) -> List[Dict[str, Any]]:
+        """Búsqueda léxica en SQLite: tokenización bilingüe (es/en) y puntuación BM25 en Python."""
+        query_tokens = lexical.tokenize(query_text)
+        if not query_tokens:
+            return []
+
+        stmt = select(*self._chunk_columns()).join(Document, DocumentChunk.document_id == Document.id)
+        if filter_document_id:
+            stmt = stmt.where(DocumentChunk.document_id == filter_document_id)
+        rows = (await db.execute(stmt)).all()
+
+        scores = lexical.bm25_scores(query_tokens, [lexical.tokenize(row.content) for row in rows])
+        ranked = sorted(
+            ((score, row) for score, row in zip(scores, rows) if score > 0.0),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
+        return [self._row_to_item(row, score) for score, row in ranked[:limit]]
 
     def _apply_rrf(
         self,

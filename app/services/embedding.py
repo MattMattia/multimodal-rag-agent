@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import logging
 import math
-from typing import List
+from typing import List, Optional
 
 from app.core.config import settings
 
@@ -24,8 +24,8 @@ class EmbeddingService:
     """Servicio para generar representaciones vectoriales densas (embeddings) con text-embedding-004."""
 
     def __init__(self):
-        self.model_name = "text-embedding-004"
-        self.dimension = 768
+        self.model_name = settings.GEMINI_EMBEDDING_MODEL
+        self.dimension = settings.EMBEDDING_DIMENSION
         self.api_key = settings.GOOGLE_API_KEY
         self._client = None
         self._initialized = False
@@ -110,12 +110,13 @@ class EmbeddingService:
         raise RuntimeError("La API de embeddings devolvió una respuesta sin vectores.")
 
     async def get_embeddings_batch(
-        self, texts: List[str], batch_size: int = 50
+        self, texts: List[str], batch_size: Optional[int] = None
     ) -> List[List[float]]:
         """Genera embeddings en lotes para optimizar llamadas a la API."""
         if not texts:
             return []
 
+        batch_size = batch_size or settings.EMBEDDING_BATCH_SIZE
         self._ensure_client()
 
         if not self._initialized or not self._client:
