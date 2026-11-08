@@ -336,7 +336,7 @@ async def test_citations_carry_rerank_score(no_langfuse):
 # ==============================================================================
 # R2-BUG-02: lossless fallback streaming without sleep, token usage in streaming
 # ==============================================================================
-from app.schemas.agent import AgentChatResponse
+from app.schemas.agent import AgentChatResponse, ToolExecutionRecord
 
 MARKDOWN_REPLY = "# Informe\n\n- item uno\n- item  dos\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n  cola con espacios \n"
 
@@ -380,3 +380,30 @@ async def test_stream_usage_is_none_without_usage_metadata(no_langfuse):
     with patch("app.services.agent.telemetry_service.record_generation") as record_gen:
         _ = [e async for e in service.execute_turn_stream(db=_fake_db(), user_message="hola")]
     assert record_gen.call_args.kwargs["usage"] is None
+
+
+@pytest.mark.parametrize("client_ready", [False, True])
+async def test_stream_emits_tool_start_before_tool_end_and_metadata_message_id(no_langfuse, client_ready):
+    """SSE contract: tool_start precedes each tool_end, and metadata carries the persisted assistant message id."""
+    service = AutonomousAgentService()
+    service._client = object() if client_ready else None
+    service._ensure_client = lambda: client_ready  # type: ignore[method-assign]
+    service._call_gemini_with_fallback = AsyncMock(side_effect=RuntimeError("gemini down"))  # type: ignore[method-assign]
+    record = ToolExecutionRecord(tool_name="search_knowledge_base", tool_input={"query": "q"}, tool_output={}, duration_ms=1.5)
+    response = _fallback_response("respuesta")
+    response.executed_tools = [record]
+    service._execute_fallback_turn = AsyncMock(return_value=response)  # type: ignore[method-assign]
+    db = _fake_db()
+
+    events = [e async for e in service.execute_turn_stream(db=db, user_message="hola")]
+
+    payloads = [_json.loads(e[len("data: "):]) for e in events]
+    types = [p["type"] for p in payloads]
+    assert types.index("tool_start") < types.index("tool_end")
+    start = payloads[types.index("tool_start")]
+    assert start["tool_name"] == "search_knowledge_base"
+    assert start["tool_input"] == {"query": "q"}
+    metadata = payloads[-1]
+    assert metadata["type"] == "metadata"
+    assistant_rows = [c.args[0] for c in db.add.call_args_list if getattr(c.args[0], "role", None) == "assistant"]
+    assert str(assistant_rows[-1].id) == metadata["message_id"]

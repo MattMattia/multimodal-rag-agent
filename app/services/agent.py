@@ -201,6 +201,12 @@ class AutonomousAgentService:
         return last.model_dump() if last is not None else None
 
     @staticmethod
+    def _tool_start_event(tool_name: str, tool_input: Any) -> str:
+        """Evento SSE `tool_start` emitido antes de ejecutar (o reportar) cada herramienta."""
+        event = {"type": "tool_start", "tool_name": tool_name, "tool_input": tool_input}
+        return f"data: {json.dumps(event, default=str)}\n\n"
+
+    @staticmethod
     def _tool_end_event(record: ToolExecutionRecord) -> str:
         """Evento SSE `tool_end` con la duración de la herramienta y, si fue una búsqueda, sus diagnósticos."""
         event = {
@@ -496,6 +502,7 @@ class AutonomousAgentService:
             executed_tools = fb_response.executed_tools
 
             for record in executed_tools:
+                yield self._tool_start_event(record.tool_name, record.tool_input)
                 yield self._tool_end_event(record)
             for chunk in _split_preserving_whitespace(full_response):
                 yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
@@ -558,6 +565,7 @@ class AutonomousAgentService:
                         tool_name = fc.name
                         tool_args = dict(fc.args) if fc.args else {}
                         logger.info("Agente (Stream) invocando tool: %s con args: %s", tool_name, tool_args)
+                        yield self._tool_start_event(tool_name, tool_args)
 
                         with telemetry_service.span(
                             parent=trace,
@@ -638,6 +646,7 @@ class AutonomousAgentService:
                 executed_tools = fb_response.executed_tools
 
                 for record in executed_tools:
+                    yield self._tool_start_event(record.tool_name, record.tool_input)
                     yield self._tool_end_event(record)
                 for chunk in _split_preserving_whitespace(full_response):
                     yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
@@ -647,8 +656,10 @@ class AutonomousAgentService:
         citations_data = [_to_json_safe(c) for c in dedup_citations]
         tools_data = [_to_json_safe(t) for t in executed_tools]
 
+        assistant_message_id = uuid.uuid4()
         metadata_event = {
             "type": "metadata",
+            "message_id": str(assistant_message_id),
             "citations": citations_data,
             "executed_tools": tools_data,
             "session_id": str(active_session_id),
@@ -660,6 +671,7 @@ class AutonomousAgentService:
         # 6. Persistir el mensaje completo en PostgreSQL
         try:
             assistant_chat_record = ChatMessage(
+                id=assistant_message_id,
                 session_id=active_session_id,
                 role="assistant",
                 content=full_response or "Sin respuesta generada.",
