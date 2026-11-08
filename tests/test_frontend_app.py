@@ -14,8 +14,10 @@ from urllib.parse import urlsplit
 
 import httpx
 import pytest
-import streamlit as st
-from streamlit.testing.v1 import AppTest
+
+# The API image ships without Streamlit; these tests belong to the dashboard and run where it is installed.
+st = pytest.importorskip("streamlit")
+from streamlit.testing.v1 import AppTest  # noqa: E402
 
 # The session-scoped conftest fixture imports app.tools, which is circular unless app.main loads first.
 import app.main  # noqa: F401, E402
