@@ -56,7 +56,7 @@ flowchart TB
         PDFParser["📑 PDF Plumber & Fitz\n• Text Extraction\n• Table-to-Markdown"]
         Vision["👁️ Vision Service\n• Gemini Multimodal Image OCR\n• Technical Diagram Synthesis"]
         Chunker["🧩 Hierarchical Chunker\n• Parent Chunks (1200 chars)\n• Child Chunks (300 chars, overlap)"]
-        Embedder["📐 Embedding Service\n• Google text-embedding-004 (768d)"]
+        Embedder["📐 Embedding Service\n• Google gemini-embedding-001 (768d)"]
     end
 
     subgraph DataStore ["Capa de Persistencia (PostgreSQL 16 + pgvector :5432)"]
@@ -190,7 +190,7 @@ MAX_UPLOAD_SIZE_MB=25           # Tamaño máximo de subida; por encima responde
 | `PARENT_CHUNK_SIZE` / `PARENT_CHUNK_OVERLAP` | `1200` / `120` | Tamaño y solape de los chunks padre. |
 | `CHILD_CHUNK_SIZE` / `CHILD_CHUNK_OVERLAP` | `350` / `40` | Tamaño y solape de los chunks hijo (los únicos vectorizados). |
 | `PDF_IMAGE_DPI` / `PDF_MIN_IMAGE_DIM` | `150` / `40` | Resolución de las imágenes extraídas de PDFs y lado mínimo (pt) para no tratar un icono como imagen. |
-| `GEMINI_EMBEDDING_MODEL` / `EMBEDDING_DIMENSION` / `EMBEDDING_BATCH_SIZE` | `text-embedding-004` / `768` / `50` | Modelo, dimensión y tamaño de lote de embeddings (cambiar la dimensión exige recrear la columna `vector`). |
+| `GEMINI_EMBEDDING_MODEL` / `EMBEDDING_DIMENSION` / `EMBEDDING_BATCH_SIZE` | `gemini-embedding-001` / `768` / `50` | Modelo, dimensión y tamaño de lote de embeddings (cambiar la dimensión exige recrear la columna `vector`). |
 | `RRF_K` | `60` | Constante de suavizado de Reciprocal Rank Fusion. |
 | `RERANK_TIMEOUT_SECONDS` / `RERANK_MAX_SNIPPET_CHARS` | `8.0` / `800` | Tiempo máximo del reranker y caracteres de cada fragmento enviados a Gemini. |
 | `AGENT_MAX_HISTORY_MESSAGES` / `AGENT_MAX_TURNS` / `AGENT_TEMPERATURE` | `20` / `4` / `0.2` | Mensajes previos enviados al LLM, iteraciones ReAct máximas y temperatura del agente. |
@@ -324,7 +324,7 @@ tests/test_telemetry.py::test_telemetry_service_exception_resilience PASSED [100
 │   │   └── search.py
 │   ├── services/                  # Lógica de negocio nuclear
 │   │   ├── agent.py               # Orquestador del Agente ReAct & Gemini Cascade
-│   │   ├── embedding.py           # Servicio de vectorización (text-embedding-004)
+│   │   ├── embedding.py           # Servicio de vectorización (gemini-embedding-001)
 │   │   ├── ingestion.py           # Pipeline de extracción, OCR y chunking jerárquico
 │   │   ├── rag_search.py          # Búsqueda híbrida RRF sobre HNSW + GIN Full-Text
 │   │   ├── reranker.py            # Servicio de Reranking Semántico con Gemini

@@ -15,13 +15,21 @@ RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
 _USE_MODERN_GENAI = False
 try:
     from google import genai
+    from google.genai import types as genai_types
     _USE_MODERN_GENAI = True
 except ImportError:
-    pass
+    genai_types = None
+
+
+def _l2_normalize(values) -> List[float]:
+    """gemini-embedding-001 only returns unit vectors at 3072 dims; truncated outputs must be normalized."""
+    vector = [float(x) for x in values]
+    norm = math.sqrt(sum(x * x for x in vector))
+    return [x / norm for x in vector] if norm else vector
 
 
 class EmbeddingService:
-    """Servicio para generar representaciones vectoriales densas (embeddings) con text-embedding-004."""
+    """Servicio para generar representaciones vectoriales densas (embeddings) con Gemini Embedding."""
 
     def __init__(self):
         self.model_name = settings.GEMINI_EMBEDDING_MODEL
@@ -72,6 +80,10 @@ class EmbeddingService:
             return True
         return "timeout" in text.lower() or "timed out" in text.lower()
 
+    def _embed_config(self):
+        """Requests EMBEDDING_DIMENSION so vectors fit the vector(768) column (the model defaults to 3072)."""
+        return genai_types.EmbedContentConfig(output_dimensionality=self.dimension)
+
     async def _embed_with_retry(self, contents):
         """Llama a la API de embeddings con hasta 3 reintentos (backoff 0.5s, 1s, 2s) ante errores transitorios.
 
@@ -81,7 +93,9 @@ class EmbeddingService:
         attempt = 0
         while True:
             try:
-                return await self._client.aio.models.embed_content(model=self.model_name, contents=contents)
+                return await self._client.aio.models.embed_content(
+                    model=self.model_name, contents=contents, config=self._embed_config()
+                )
             except Exception as e:
                 if attempt >= len(RETRY_BACKOFF_SECONDS) or not self._is_transient(e):
                     logger.error("Error en API de embeddings (intento %d): %s", attempt + 1, e)
@@ -104,9 +118,9 @@ class EmbeddingService:
 
         response = await self._embed_with_retry(text)
         if hasattr(response, "embedding") and response.embedding:
-            return response.embedding.values
+            return _l2_normalize(response.embedding.values)
         if hasattr(response, "embeddings") and response.embeddings:
-            return response.embeddings[0].values
+            return _l2_normalize(response.embeddings[0].values)
         raise RuntimeError("La API de embeddings devolvió una respuesta sin vectores.")
 
     async def get_embeddings_batch(
@@ -129,7 +143,7 @@ class EmbeddingService:
             response = await self._embed_with_retry(batch)
             if not (hasattr(response, "embeddings") and response.embeddings):
                 raise RuntimeError("La API de embeddings devolvió un lote sin vectores.")
-            all_embeddings.extend(emb.values for emb in response.embeddings)
+            all_embeddings.extend(_l2_normalize(emb.values) for emb in response.embeddings)
 
         return all_embeddings
 

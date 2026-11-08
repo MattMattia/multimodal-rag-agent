@@ -30,7 +30,7 @@ def test_defaults_equal_previous_chunking_and_pdf_constants(defaults):
 
 
 def test_defaults_equal_previous_embedding_constants(defaults):
-    assert defaults.GEMINI_EMBEDDING_MODEL == "text-embedding-004"
+    assert defaults.GEMINI_EMBEDDING_MODEL == "gemini-embedding-001"
     assert defaults.EMBEDDING_DIMENSION == 768
     assert defaults.EMBEDDING_BATCH_SIZE == 50
 
@@ -70,7 +70,7 @@ def test_ingestion_chunk_sizes_come_from_settings(monkeypatch):
 
 
 def test_embedding_dimension_and_model_come_from_settings(monkeypatch):
-    assert EmbeddingService().model_name == "text-embedding-004"
+    assert EmbeddingService().model_name == "gemini-embedding-001"
     assert len(EmbeddingService()._generate_mock_embedding("hola")) == 768
     monkeypatch.setattr(settings, "GEMINI_EMBEDDING_MODEL", "other-model")
     monkeypatch.setattr(settings, "EMBEDDING_DIMENSION", 16)
@@ -82,7 +82,7 @@ def test_embedding_dimension_and_model_come_from_settings(monkeypatch):
 async def test_embedding_batch_size_defaults_to_settings(monkeypatch):
     calls = []
 
-    async def embed_content(model, contents):
+    async def embed_content(model, contents, config=None):
         calls.append(len(contents))
         return SimpleNamespace(embeddings=[SimpleNamespace(values=[0.1]) for _ in contents])
 

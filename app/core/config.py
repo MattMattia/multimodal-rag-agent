@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = ""
     GEMINI_AGENT_MODEL: str = "gemini-1.5-pro"
     GEMINI_VISION_MODEL: str = "gemini-1.5-flash"
-    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
+    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
     EMBEDDING_DIMENSION: int = 768
     EMBEDDING_BATCH_SIZE: int = 50
 

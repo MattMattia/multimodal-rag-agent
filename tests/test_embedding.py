@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.services import embedding as embedding_module
 from app.services.embedding import EmbeddingService
 
-REAL_VECTOR = [0.25] * 768
+REAL_VECTOR = [1.0] + [0.0] * 767  # already unit-length, so normalization keeps it unchanged
 
 
 def _configured_service(monkeypatch, embed_mock):
@@ -108,3 +108,30 @@ async def test_mock_vectors_only_when_client_is_not_configured(monkeypatch):
     assert single == service._generate_mock_embedding("texto")
     assert [len(v) for v in batch] == [768, 768]
     assert batch[0] == single
+
+
+@pytest.mark.asyncio
+async def test_requests_configured_output_dimensionality_and_returns_unit_vectors(monkeypatch):
+    """gemini-embedding-001 defaults to 3072 dims: the call must request EMBEDDING_DIMENSION and normalize."""
+    raw = [3.0, 4.0] + [0.0] * 766
+    embed = AsyncMock(return_value=_single(raw))
+    service = _configured_service(monkeypatch, embed)
+
+    vector = await service.get_embedding("hola mundo")
+
+    config = embed.await_args.kwargs["config"]
+    assert config.output_dimensionality == settings.EMBEDDING_DIMENSION
+    assert vector[:2] == pytest.approx([0.6, 0.8])
+    assert len(vector) == 768
+
+
+@pytest.mark.asyncio
+async def test_batch_requests_output_dimensionality_and_normalizes(monkeypatch):
+    raw = [0.0, 2.0] + [0.0] * 766
+    embed = AsyncMock(return_value=SimpleNamespace(embeddings=[SimpleNamespace(values=raw)] * 2))
+    service = _configured_service(monkeypatch, embed)
+
+    vectors = await service.get_embeddings_batch(["a", "b"])
+
+    assert embed.await_args.kwargs["config"].output_dimensionality == settings.EMBEDDING_DIMENSION
+    assert [v[1] for v in vectors] == pytest.approx([1.0, 1.0])
