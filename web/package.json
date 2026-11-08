@@ -1,0 +1,41 @@
+{
+  "name": "rag-agent-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Next.js 15 BFF + 24/7 serverless showcase for the Multimodal RAG & Autonomous Agent platform",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "node node_modules/next/dist/bin/next dev --port 3001",
+    "build": "node node_modules/next/dist/bin/next build",
+    "start": "node node_modules/next/dist/bin/next start --port 3001",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "lint": "node node_modules/eslint/bin/eslint.js .",
+    "test": "node node_modules/vitest/vitest.mjs run",
+    "contracts:generate": "node node_modules/openapi-typescript/bin/cli.js src/lib/openapi.json -o src/lib/api-schema.ts",
+    "check:bundle": "node scripts/check-client-bundle.mjs"
+  },
+  "dependencies": {
+    "next": "15.5.29",
+    "react": "19.2.9",
+    "react-dom": "19.2.9",
+    "server-only": "0.0.1"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.3.7",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.8",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "9.39.5",
+    "eslint-config-next": "15.5.29",
+    "jsdom": "26.1.0",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.6",
+    "vitest": "5.1.0"
+  }
+}

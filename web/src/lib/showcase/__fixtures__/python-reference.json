@@ -1,0 +1,297 @@
+{
+ "bm25_reference": [
+  {
+   "id": "q1",
+   "tokens": [
+    "parametro",
+    "usa",
+    "indic",
+    "hnsw"
+   ],
+   "top": [
+    {
+     "id": "f02caacb-d734-5c9c-b72d-6eb2ceaaadd2",
+     "score": 6.27548898
+    },
+    {
+     "id": "b4758ec9-09ad-56c1-9a2d-06637721ae7b",
+     "score": 4.362238171
+    },
+    {
+     "id": "cf63ed62-42e3-5d4c-92a2-220fa83f329b",
+     "score": 4.299921905
+    },
+    {
+     "id": "558dd79e-fbc6-5f96-b010-d65bc53437f0",
+     "score": 2.903834758
+    },
+    {
+     "id": "18d251ab-9ebd-584c-8b81-6cc53f7daf01",
+     "score": 2.793414436
+    },
+    {
+     "id": "98b6a1ec-b9f8-58a6-b30c-bbf8cc75a235",
+     "score": 2.409210511
+    },
+    {
+     "id": "581cbea4-f0f8-54a2-931a-9cd430c4c89a",
+     "score": 1.758548375
+    },
+    {
+     "id": "ad2aef82-377e-521d-8305-8449078e7a2e",
+     "score": 1.183822216
+    }
+   ]
+  },
+  {
+   "id": "q2",
+   "tokens": [
+    "constant",
+    "k",
+    "fusion",
+    "reciprocal",
+    "rank",
+    "fusion",
+    "rrf"
+   ],
+   "top": [
+    {
+     "id": "52e261b7-605a-5b39-b626-a8a800caeeaf",
+     "score": 15.028789179
+    },
+    {
+     "id": "b556fef8-7914-5896-ac44-c9a092134ba0",
+     "score": 14.64016481
+    },
+    {
+     "id": "b16b9959-7091-593b-ad2a-b4a9f4b46bcd",
+     "score": 9.971407236
+    },
+    {
+     "id": "18d251ab-9ebd-584c-8b81-6cc53f7daf01",
+     "score": 4.130222123
+    },
+    {
+     "id": "581cbea4-f0f8-54a2-931a-9cd430c4c89a",
+     "score": 3.294121084
+    },
+    {
+     "id": "92c6df57-168c-5cf0-a5d9-e73cd1a76a1e",
+     "score": 2.032395695
+    },
+    {
+     "id": "23f52b71-e25e-5bf1-b305-57a217a11518",
+     "score": 1.923009875
+    },
+    {
+     "id": "fb173bc9-830c-52d3-ad23-d0a4d5cf41a8",
+     "score": 1.884685201
+    },
+    {
+     "id": "5b96e417-9ef1-55f1-8b6f-c2d19e9fcd99",
+     "score": 1.326787884
+    },
+    {
+     "id": "cf63ed62-42e3-5d4c-92a2-220fa83f329b",
+     "score": 0.660374028
+    }
+   ]
+  },
+  {
+   "id": "q3",
+   "tokens": [
+    "long",
+    "reranking",
+    "step",
+    "take",
+    "slowest",
+    "5",
+    "request"
+   ],
+   "top": [
+    {
+     "id": "5b96e417-9ef1-55f1-8b6f-c2d19e9fcd99",
+     "score": 2.474043719
+    },
+    {
+     "id": "98b6a1ec-b9f8-58a6-b30c-bbf8cc75a235",
+     "score": 2.409210511
+    },
+    {
+     "id": "cf63ed62-42e3-5d4c-92a2-220fa83f329b",
+     "score": 1.231390665
+    },
+    {
+     "id": "ad2aef82-377e-521d-8305-8449078e7a2e",
+     "score": 1.183822216
+    }
+   ]
+  },
+  {
+   "id": "q4",
+   "tokens": [
+    "cuanto",
+    "fueron",
+    "ingreso",
+    "norteamerica",
+    "trimestr"
+   ],
+   "top": [
+    {
+     "id": "7fb16196-2492-581a-8383-1420aa4a3574",
+     "score": 7.281146064
+    },
+    {
+     "id": "1e159306-c555-58b1-ae47-8b068ff29d60",
+     "score": 6.088488835
+    },
+    {
+     "id": "094a6bee-de1a-51ff-8cb4-e269249a8374",
+     "score": 4.778432838
+    },
+    {
+     "id": "5816bf58-c0ad-5e36-97dc-2d7d30881434",
+     "score": 4.76335402
+    },
+    {
+     "id": "1f050d07-0255-5894-a484-2d66a74ddf27",
+     "score": 4.386060716
+    },
+    {
+     "id": "ee103802-1a99-5086-bf27-6a6aad037154",
+     "score": 3.704913115
+    },
+    {
+     "id": "f97deef2-f87f-542f-b81f-15d8e5585493",
+     "score": 2.771675541
+    },
+    {
+     "id": "7abdbb73-5d7a-5450-b890-69be5108a69f",
+     "score": 2.478812034
+    }
+   ]
+  },
+  {
+   "id": "q5",
+   "tokens": [
+    "ganancia",
+    "operativa",
+    "porcentual"
+   ],
+   "top": [
+    {
+     "id": "094a6bee-de1a-51ff-8cb4-e269249a8374",
+     "score": 2.614773783
+    },
+    {
+     "id": "5816bf58-c0ad-5e36-97dc-2d7d30881434",
+     "score": 1.666707218
+    }
+   ]
+  },
+  {
+   "id": "q6",
+   "tokens": [
+    "evitan",
+    "webhook",
+    "apunt",
+    "ips",
+    "interna"
+   ],
+   "top": [
+    {
+     "id": "98b6a1ec-b9f8-58a6-b30c-bbf8cc75a235",
+     "score": 2.743434576
+    },
+    {
+     "id": "5b96e417-9ef1-55f1-8b6f-c2d19e9fcd99",
+     "score": 1.923009875
+    },
+    {
+     "id": "ad2aef82-377e-521d-8305-8449078e7a2e",
+     "score": 1.560335756
+    },
+    {
+     "id": "cf63ed62-42e3-5d4c-92a2-220fa83f329b",
+     "score": 0.957127956
+    }
+   ]
+  },
+  {
+   "id": "q7",
+   "tokens": [
+    "safeguard",
+    "protect",
+    "fil",
+    "user",
+    "upload"
+   ],
+   "top": [
+    {
+     "id": "00d3c643-5bd4-54c9-94b5-a6b55f2d107d",
+     "score": 2.409210511
+    },
+    {
+     "id": "ad2aef82-377e-521d-8305-8449078e7a2e",
+     "score": 1.183822216
+    }
+   ]
+  },
+  {
+   "id": "q8",
+   "tokens": [
+    "esquema",
+    "visual",
+    "conectan",
+    "servicio",
+    "base",
+    "dato"
+   ],
+   "top": [
+    {
+     "id": "fb0f8542-2a58-57d2-b161-b5054cacd243",
+     "score": 3.654026644
+    },
+    {
+     "id": "18d251ab-9ebd-584c-8b81-6cc53f7daf01",
+     "score": 2.562969311
+    },
+    {
+     "id": "cf63ed62-42e3-5d4c-92a2-220fa83f329b",
+     "score": 2.305782554
+    },
+    {
+     "id": "5b96e417-9ef1-55f1-8b6f-c2d19e9fcd99",
+     "score": 2.158610245
+    }
+   ]
+  }
+ ],
+ "tokenize_samples": {
+  "Ingresos por región de Norteamérica": [
+   "ingreso",
+   "region",
+   "norteamerica"
+  ],
+  "controles files ies Políticas": [
+   "control",
+   "fil",
+   "ies",
+   "politica"
+  ],
+  "What safeguards protect the files?": [
+   "safeguard",
+   "protect",
+   "fil"
+  ],
+  "ef_construction=64 m=16 $45M 34%": [
+   "ef",
+   "construction",
+   "64",
+   "m",
+   "16",
+   "45m",
+   "34"
+  ]
+ }
+}

@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+coverage/
+next-env.d.ts
+*.tsbuildinfo
+.env*.local
+.env
+.vercel
+npm-debug.log*
+
+# The root .gitignore ignores Python "lib/" dirs; this folder is source code.
+!src/lib/
