@@ -30,3 +30,7 @@ pytest-asyncio>=0.23.7
 
 # Observabilidad y Telemetría
 langfuse>=2.0.0,<3.0.0
+
+# Calidad de código (CI)
+ruff>=0.5.0
+mypy>=1.10.0

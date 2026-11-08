@@ -70,6 +70,21 @@ services:
     volumes:
       - ./frontend:/app
 
+  # Frontend Next.js 15 (BFF + Showcase); 3001 convive con Langfuse en :3000
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: rag_web
+    restart: always
+    depends_on:
+      - api
+    environment:
+      FASTAPI_URL: http://api:8000
+      API_KEY: ${API_KEY:-}
+    ports:
+      - "3001:3000"
+
   # Servicio de Observabilidad y Telemetría con Langfuse
   langfuse:
     image: langfuse/langfuse:2
