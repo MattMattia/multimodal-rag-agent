@@ -474,7 +474,7 @@ Variables de Docker Compose: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
 | `GET` | `/api/v1/documents/{id}` | Detalle de un documento y fragmentos generados |
 | `POST` | `/api/v1/search` | Búsqueda Híbrida (`query`, `top_k`, `mode`, `filter_document_id`, `rerank`); la respuesta incluye `diagnostics` (latencia por etapa: `embedding_ms`, `dense_ms`, `sparse_ms`, `rrf_fusion_ms`, `rerank_ms`, `total_ms`, candidatos y bloques únicos) |
 | `POST` | `/api/v1/agent/chat` | Interacción multi-turno con el Agente Autónomo ReAct |
-| `POST` | `/api/v1/agent/chat/stream` | Respuestas en Streaming en tiempo real (Server-Sent Events: `token`, `tool_end` con `duration_ms` y `diagnostics`, y `metadata` final con `diagnostics` y `duration_ms`). Ambos endpoints de chat aceptan `filter_document_id`, `search_mode`, `top_k`, `enable_rerank`, `temperature` y `max_turns` |
+| `POST` | `/api/v1/agent/chat/stream` | Respuestas en Streaming en tiempo real (Server-Sent Events: `token`, `tool_end` con `duration_ms` y `diagnostics`, y `metadata` final con `diagnostics` y `duration_ms`). Ambos endpoints de chat aceptan `filter_document_id`, `search_mode`, `top_k`, `enable_rerank`, `temperature`, `max_turns` y `language` (`es` \| `en` \| `auto`, por defecto `auto`: se detecta del mensaje) |
 | `GET` | `/api/v1/agent/sessions/{session_id}/history` | Historial persistido de una conversación |
 | `GET` | `/uploads/reports/{filename}` | Descarga de reportes PDF generados por el agente (exige `X-API-Key` si `API_KEY` está definida; solo sirve archivos dentro de `uploads/reports/`) |
 | `GET` | `/api/v1/reports/{filename}` | Reporte PDF generado por el agente (`Content-Disposition: inline`); mismo control de contención que la ruta legada |
@@ -482,11 +482,11 @@ Variables de Docker Compose: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
 | `GET` | `/api/v1/documents/{id}/images/{image_id}/file` | Imagen extraída o subida (`image/png`, `image/jpeg`, `image/webp`); verifica que pertenezca al documento |
 | `GET` | `/api/v1/agent/sessions` | Sesiones de chat (`session_id`, `title`, `created_at`, `updated_at`, `message_count`) por `updated_at` descendente |
 | `DELETE` | `/api/v1/agent/sessions/{session_id}` | Elimina los mensajes de una sesión (`204`, o `404` si no existe) |
-| `GET` | `/api/v1/agent/sessions/{session_id}/export?format=markdown\|pdf` | Exporta la conversación con citas y herramientas ejecutadas |
+| `GET` | `/api/v1/agent/sessions/{session_id}/export?format=markdown\|pdf&lang=es\|en` | Exporta la conversación con citas y herramientas ejecutadas; `lang` (por defecto `es`) localiza las etiquetas |
 | `POST` | `/api/v1/agent/feedback` | Feedback `{session_id, message_id, rating: 1\|-1, comment}`; se guarda en `message_metadata` y se envía a Langfuse si está activo |
 | `POST` | `/api/v1/demo/seed` | Re-siembra idempotente del Golden Corpus (genera los PDFs/PNGs que falten; sin API key no llama a Gemini) |
 | `GET` | `/api/v1/demo/status` | `db_dialect`, `demo_seeded`, totales de documentos/chunks/imágenes, `gemini_configured`, `langfuse_enabled` y `active_models` |
-| `POST` | `/api/v1/demo/evaluate` | Evaluación RAG `dense` vs `sparse` vs `hybrid` (RRF + reranker); ver la sección de benchmark |
+| `POST` | `/api/v1/demo/evaluate?lang=es\|en` | Evaluación RAG `dense` vs `sparse` vs `hybrid` (RRF + reranker); ver la sección de benchmark |
 
 ### OpenAPI
 
