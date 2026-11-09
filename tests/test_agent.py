@@ -516,3 +516,27 @@ async def test_stream_gemini_failure_after_tokens_persists_exactly_what_was_stre
     assert assistant.content == streamed
     starts = [p["tool_name"] for p in payloads if p["type"] == "tool_start"]
     assert starts == ["search_knowledge_base", "generate_report_pdf"]  # no replayed tool events
+
+
+async def test_stream_helper_does_not_restart_on_next_model_after_partial_output(no_langfuse):
+    """A retriable error after tokens were yielded must surface instead of re-streaming a second full answer."""
+    service = AutonomousAgentService()
+
+    async def partial_then_503():
+        yield SimpleNamespace(text="Hola ")
+        raise RuntimeError("503 UNAVAILABLE")
+
+    calls = []
+
+    async def generate_content_stream(model, contents, config):
+        calls.append(model)
+        return partial_then_503()
+
+    service._client = SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content_stream=generate_content_stream)))
+    received = []
+    with pytest.raises(RuntimeError, match="503"):
+        async for text in service._call_gemini_stream_with_fallback(contents=[], config=None):
+            received.append(text)
+
+    assert received == ["Hola "]
+    assert len(calls) == 1

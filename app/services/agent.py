@@ -429,6 +429,7 @@ class AutonomousAgentService:
 
         last_exc: Exception | None = None
         for m in unique_models:
+            emitted = False
             try:
                 logger.info("Invocando streaming con modelo Gemini: %s", m)
                 stream = await self._client.aio.models.generate_content_stream(
@@ -439,11 +440,17 @@ class AutonomousAgentService:
                 self._working_model = m
                 async for chunk in stream:
                     if chunk.text:
+                        emitted = True
                         yield chunk.text
                 return
             except Exception as e:
                 last_exc = e
                 err_text = str(e)
+                if emitted:
+                    # Restarting on another model would stream a second full answer after the partial one;
+                    # let the caller switch to the contingency engine with its visible separator instead.
+                    logger.error("Stream de Gemini interrumpido tras emitir tokens con '%s': %s", m, err_text[:200])
+                    raise
                 logger.warning("Intento de stream con modelo Gemini '%s' no disponible: %s", m, err_text[:200])
                 if any(k in err_text for k in ["404", "503", "RESOURCE_EXHAUSTED", "NOT_FOUND", "429"]):
                     if "429" in err_text or "RESOURCE_EXHAUSTED" in err_text:
