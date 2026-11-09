@@ -287,3 +287,12 @@ async def test_agent_history_window_comes_from_settings(monkeypatch):
     with patch.object(telemetry_service, "_enabled", False):
         await _run_turn(_looping_service(configs, seen), history=history)
     assert [c.parts[0].text for c in seen[0]] == ["m4", "m5", "x"]
+
+
+def test_default_gemini_models_are_not_retired(monkeypatch):
+    """Code defaults must point to a served model, not the retired gemini-1.5-* family."""
+    monkeypatch.delenv("GEMINI_AGENT_MODEL", raising=False)
+    monkeypatch.delenv("GEMINI_VISION_MODEL", raising=False)
+    defaults = Settings(_env_file=None)
+    assert defaults.GEMINI_AGENT_MODEL == "gemini-3.8-flash"
+    assert defaults.GEMINI_VISION_MODEL == "gemini-3.8-flash"

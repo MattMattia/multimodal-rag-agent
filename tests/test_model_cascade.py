@@ -18,6 +18,11 @@ MODERN_CASCADE = [
 ]
 
 
+def _preferred_then_cascade(preferred: str) -> list[str]:
+    """Expected try order: the configured model first, then the cascade, without repeating a model."""
+    return list(dict.fromkeys([preferred, *MODERN_CASCADE]))
+
+
 class _RecordingClient:
     """Fake Gemini client whose every call fails with a 404 and records the model it was asked for."""
 
@@ -45,7 +50,7 @@ async def test_agent_sync_cascade_order():
     service._client = client = _RecordingClient()
     with pytest.raises(Exception, match="404"):
         await service._call_gemini_with_fallback(contents=[], config=None)
-    assert client.models_tried == [service.model_name, *MODERN_CASCADE]
+    assert client.models_tried == _preferred_then_cascade(service.model_name)
 
 
 @pytest.mark.asyncio
@@ -54,7 +59,7 @@ async def test_agent_stream_cascade_order():
     service._client = client = _RecordingClient()
     with pytest.raises(Exception, match="404"):
         _ = [t async for t in service._call_gemini_stream_with_fallback(contents=[], config=None)]
-    assert client.models_tried == [service.model_name, *MODERN_CASCADE]
+    assert client.models_tried == _preferred_then_cascade(service.model_name)
 
 
 @pytest.mark.asyncio
@@ -74,7 +79,7 @@ async def test_reranker_cascade_order():
     candidates = [{"content": "a", "document_name": "d", "score": 0.5}, {"content": "b", "document_name": "d", "score": 0.4}]
     with pytest.raises(RuntimeError, match="Ningún modelo"):
         await service._score_with_gemini(query="q", candidates=candidates, top_n=2)
-    assert client.models_tried == [service.model_name, *MODERN_CASCADE]
+    assert client.models_tried == _preferred_then_cascade(service.model_name)
 
 
 @pytest.mark.asyncio
@@ -86,5 +91,5 @@ async def test_vision_cascade_order(tmp_path):
     service._initialized = True
     service._client = client = _RecordingClient()
     result = await service.describe_image(str(png))
-    assert client.models_tried == [service.model_name, *MODERN_CASCADE]
+    assert client.models_tried == _preferred_then_cascade(service.model_name)
     assert result.startswith("[Error al procesar imagen")

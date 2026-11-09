@@ -135,8 +135,8 @@ async def test_agent_chat_stream_endpoint():
 
 def test_gemini_model_configuration():
     """Valida que los modelos de Gemini se inicialicen leyendo las variables de entorno configuradas."""
-    assert settings.GEMINI_AGENT_MODEL == "gemini-1.5-pro"
-    assert settings.GEMINI_VISION_MODEL == "gemini-1.5-flash"
+    assert settings.GEMINI_AGENT_MODEL == "gemini-3.8-flash"
+    assert settings.GEMINI_VISION_MODEL == "gemini-3.8-flash"
     assert autonomous_agent_service.model_name == settings.GEMINI_AGENT_MODEL
 
     vision_service = VisionService()

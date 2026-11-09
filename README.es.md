@@ -389,7 +389,7 @@ Para conectarla a un backend local, define `FASTAPI_URL=http://localhost:8000` e
 |---|---|
 | `address already in use` / puerto ocupado | Otro proceso usa el puerto. API: `python run.py --port 8010`. Streamlit: `streamlit run frontend/app.py --server.port 8502`. Docker: cambia el mapeo en `docker-compose.yml` o `POSTGRES_PORT` para la base de datos. |
 | `404` con `text-embedding-004` | Ese modelo ya no está disponible. El proyecto usa `GEMINI_EMBEDDING_MODEL=gemini-embedding-001`; corrige o elimina esa línea en un `.env` antiguo. |
-| `404 NOT_FOUND` con modelos `gemini-1.5-*` | Modelos retirados. La cascada promueve a un modelo disponible, pero conviene definir `GEMINI_AGENT_MODEL` y `GEMINI_VISION_MODEL` en `.env` con un modelo vigente (por ejemplo `gemini-3.8-flash`). `docker-compose.yml` también usa `gemini-1.5-*` como valor por defecto si `.env` no los define. |
+| `404 NOT_FOUND` con modelos `gemini-1.5-*` | Modelos retirados. La cascada promueve a un modelo disponible, pero conviene definir `GEMINI_AGENT_MODEL` y `GEMINI_VISION_MODEL` en `.env` con un modelo vigente (por ejemplo `gemini-3.8-flash`). El código y `docker-compose.yml` ya usan `gemini-3.8-flash` por defecto, así que solo ocurre con un `.env` antiguo. |
 | `Cannot connect to the Docker daemon` / `docker compose` falla | Docker Desktop no está en ejecución. Ábrelo, espera a que el motor arranque y repite el comando. |
 | `npx` o los shims de npm fallan en Windows | La ruta contiene `&`. Usa `npm run dev/build/test` o clona en una carpeta sin `&`. |
 | Avisos `LF will be replaced by CRLF` | Conversión de finales de línea de Git en Windows. Son inofensivos. |
@@ -412,8 +412,8 @@ Valores por defecto tomados de `app/core/config.py`. Las variables se leen desde
 | `AUTO_SEED_DEMO_CORPUS` | `true` | Al terminar `init_db()`, si `documents` está vacía se siembra el Golden Corpus (3 PDFs + 3 PNGs generados localmente) |
 | **Google / Gemini** | | |
 | `GOOGLE_API_KEY` | vacío | Sin clave, embeddings simulados (SHA-256), reranker en modo fallback y agente de respaldo |
-| `GEMINI_AGENT_MODEL` | `gemini-1.5-pro` | Modelo preferido del agente y del reranker; si no está disponible, entra la cascada |
-| `GEMINI_VISION_MODEL` | `gemini-1.5-flash` | Modelo de descripción de imágenes y diagramas |
+| `GEMINI_AGENT_MODEL` | `gemini-3.8-flash` | Modelo preferido del agente y del reranker; si no está disponible, entra la cascada |
+| `GEMINI_VISION_MODEL` | `gemini-3.8-flash` | Modelo de descripción de imágenes y diagramas |
 | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | Modelo de embeddings (la API actual no expone `text-embedding-004`) |
 | `EMBEDDING_DIMENSION` | `768` | Dimensión de embeddings y de la columna `vector(N)`. Cambiarla exige recrear la columna |
 | `EMBEDDING_BATCH_SIZE` | `50` | Textos por llamada a la API de embeddings |

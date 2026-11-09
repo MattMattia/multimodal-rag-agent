@@ -389,7 +389,7 @@ To connect it to a local backend, set `FASTAPI_URL=http://localhost:8000` in `we
 |---|---|
 | `address already in use` / port taken | Another process holds the port. API: `python run.py --port 8010`. Streamlit: `streamlit run frontend/app.py --server.port 8502`. Docker: change the mapping in `docker-compose.yml`, or `POSTGRES_PORT` for the database. |
 | `404` with `text-embedding-004` | That model is no longer available. The project uses `GEMINI_EMBEDDING_MODEL=gemini-embedding-001`; fix or remove that line in an older `.env`. |
-| `404 NOT_FOUND` with `gemini-1.5-*` models | Retired models. The cascade promotes to an available model, but it is better to set `GEMINI_AGENT_MODEL` and `GEMINI_VISION_MODEL` in `.env` to a current model (for example `gemini-3.8-flash`). `docker-compose.yml` also defaults to `gemini-1.5-*` when `.env` does not set them. |
+| `404 NOT_FOUND` with `gemini-1.5-*` models | Retired models. The cascade promotes to an available model, but it is better to set `GEMINI_AGENT_MODEL` and `GEMINI_VISION_MODEL` in `.env` to a current model (for example `gemini-3.8-flash`). The code and `docker-compose.yml` now default to `gemini-3.8-flash`, so this only happens with an older `.env`. |
 | `Cannot connect to the Docker daemon` / `docker compose` fails | Docker Desktop is not running. Open it, wait for the engine to start, and run the command again. |
 | `npx` or npm shims fail on Windows | The path contains `&`. Use `npm run dev/build/test`, or clone into a folder without `&`. |
 | `LF will be replaced by CRLF` warnings | Git line-ending conversion on Windows. Harmless. |
@@ -412,8 +412,8 @@ Defaults taken from `app/core/config.py`. Variables are read from the environmen
 | `AUTO_SEED_DEMO_CORPUS` | `true` | After `init_db()`, seeds the Golden Corpus (3 PDFs + 3 locally generated PNGs) if `documents` is empty |
 | **Google / Gemini** | | |
 | `GOOGLE_API_KEY` | empty | Without a key: mock embeddings (SHA-256), reranker in fallback mode, and the fallback agent |
-| `GEMINI_AGENT_MODEL` | `gemini-1.5-pro` | Preferred model for the agent and the reranker; the cascade takes over if it is unavailable |
-| `GEMINI_VISION_MODEL` | `gemini-1.5-flash` | Model for image and diagram descriptions |
+| `GEMINI_AGENT_MODEL` | `gemini-3.8-flash` | Preferred model for the agent and the reranker; the cascade takes over if it is unavailable |
+| `GEMINI_VISION_MODEL` | `gemini-3.8-flash` | Model for image and diagram descriptions |
 | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | Embedding model (the current API no longer exposes `text-embedding-004`) |
 | `EMBEDDING_DIMENSION` | `768` | Dimension of the embeddings and of the `vector(N)` column. Changing it requires recreating the column |
 | `EMBEDDING_BATCH_SIZE` | `50` | Texts per embedding API call |
