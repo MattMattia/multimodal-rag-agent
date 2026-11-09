@@ -7,6 +7,7 @@ from typing import Any
 import api_client
 import pandas as pd
 import streamlit as st
+from i18n import t
 
 from views.diagnostics import last_diagnostics, render_diagnostics
 
@@ -15,38 +16,39 @@ THUMBS_UP = 1  # st.feedback("thumbs") returns 1 for 👍 and 0 for 👎
 
 
 def _render_citations(citations: list[dict[str, Any]]) -> None:
-    with st.expander(f"📚 Fuentes y Citas ({len(citations)})", expanded=False):
+    with st.expander(t("citations_title", count=len(citations)), expanded=False):
         for c in citations:
-            doc_name = html.escape(str(c.get("document_name", "Documento")))
+            doc_name = html.escape(str(c.get("document_name", t("citation_document"))))
             page_num = c.get("page_number")
-            page_str = f"Pág. {html.escape(str(page_num))}" if page_num else "Pág. N/D"
+            page_str = t("citation_page", page=html.escape(str(page_num))) if page_num else t("citation_page_na")
             chunk_type = html.escape(str(c.get("chunk_type", "text")))
+            type_label = html.escape(t("citation_type"))
             st.markdown(
-                f"<div class='citation-box'>📄 <b>{doc_name}</b> ({page_str}) — Tipo: <code>{chunk_type}</code></div>",
+                f"<div class='citation-box'>📄 <b>{doc_name}</b> ({page_str}) — {type_label}: <code>{chunk_type}</code></div>",
                 unsafe_allow_html=True,
             )
 
 
 def _render_tools(tools: list[dict[str, Any]]) -> None:
-    with st.expander(f"🛠️ Herramientas Ejecutadas ({len(tools)})", expanded=False):
-        for t in tools:
-            tool_name = html.escape(str(t.get("tool_name", "tool")))
+    with st.expander(t("tools_title", count=len(tools)), expanded=False):
+        for tool in tools:
+            tool_name = html.escape(str(tool.get("tool_name", "tool")))
             st.markdown(f"<span class='tool-badge'>⚡ {tool_name}</span>", unsafe_allow_html=True)
-            st.json({"Entrada": t.get("tool_input"), "Salida": t.get("tool_output")})
+            st.json({t("tool_input"): tool.get("tool_input"), t("tool_output"): tool.get("tool_output")})
 
 
 def _render_report_downloads(tools: list[dict[str, Any]], key_prefix: str) -> None:
-    for index, t in enumerate(tools):
-        if t.get("tool_name") != "generate_report_pdf":
+    for index, tool in enumerate(tools):
+        if tool.get("tool_name") != "generate_report_pdf":
             continue
-        output = t.get("tool_output", {})
+        output = tool.get("tool_output", {})
         if not (isinstance(output, dict) and output.get("status") == "success" and output.get("download_url")):
             continue
-        filename = output.get("filename", "reporte.pdf")
+        filename = output.get("filename", t("report_filename"))
         pdf_data = api_client.fetch_file_bytes(output["download_url"])
         if pdf_data:
             st.download_button(
-                label=f"📥 Descargar {filename}",
+                label=t("report_download", filename=filename),
                 data=pdf_data,
                 file_name=filename,
                 mime="application/pdf",
@@ -61,9 +63,9 @@ def _send_feedback(session_id: str, message_id: str) -> None:
     rating = 1 if value == THUMBS_UP else -1
     res = api_client.submit_feedback(session_id, message_id, rating)
     if res["success"]:
-        st.session_state.flash = ("success", "Gracias por tu valoración.")
+        st.session_state.flash = ("success", t("feedback_thanks"))
     else:
-        st.session_state.flash = ("error", f"No se pudo registrar la valoración: {res.get('error')}")
+        st.session_state.flash = ("error", t("feedback_failed", error=res.get("error")))
 
 
 def _render_assistant_extras(msg: dict[str, Any], session_id: str) -> None:
@@ -75,7 +77,7 @@ def _render_assistant_extras(msg: dict[str, Any], session_id: str) -> None:
         _render_tools(tools)
     diagnostics = last_diagnostics(tools)
     if diagnostics:
-        with st.expander("🩻 Rayos X de latencia", expanded=False):
+        with st.expander(t("xray_title"), expanded=False):
             render_diagnostics(diagnostics, tool_events=tools)
     message_id = msg.get("id")
     _render_report_downloads(tools, key_prefix=str(message_id or uuid.uuid4()))
@@ -104,7 +106,7 @@ def render_last_turn() -> None:
     last_turn = st.session_state.get(LAST_TURN_KEY)
     if not isinstance(last_turn, dict):
         return
-    with st.expander("🩻 Rayos X del último turno", expanded=True):
+    with st.expander(t("xray_last_turn"), expanded=True):
         render_diagnostics(
             last_turn.get("diagnostics"),
             duration_ms=last_turn.get("duration_ms"),
@@ -120,7 +122,7 @@ def handle_user_input(user_input: str, session_id: str, options: api_client.Chat
         metadata: dict[str, Any] = {}
         st.write_stream(api_client.stream_chat_response(user_input, session_id, options, metadata))
         if metadata.get("error"):
-            st.error(f"Error al comunicar con el agente: {metadata['error']}")
+            st.error(t("agent_error", error=metadata["error"]))
             return
         st.session_state[LAST_TURN_KEY] = {
             "diagnostics": metadata.get("diagnostics"),
@@ -140,41 +142,41 @@ def handle_user_input(user_input: str, session_id: str, options: api_client.Chat
 
 def render_search_lab(options: api_client.ChatOptions) -> None:
     """Direct `POST /api/v1/search` with the sidebar hyperparameters, showing results and diagnostics."""
-    st.header("Búsqueda RAG directa", anchor=False)
-    st.caption("Ejecuta la búsqueda híbrida sin el agente, con los hiperparámetros del panel lateral.")
+    st.header(t("search_header"), anchor=False)
+    st.caption(t("search_caption"))
     with st.form("search_form", border=False):
-        query = st.text_input("Consulta", key="search_query")
-        submitted = st.form_submit_button("Buscar", icon=":material/search:", type="primary")
+        query = st.text_input(t("search_query"), key="search_query")
+        submitted = st.form_submit_button(t("search_btn"), icon=":material/search:", type="primary")
     if submitted and query.strip():
-        with st.spinner("Buscando..."):
+        with st.spinner(t("search_spinner")):
             st.session_state.search_result = api_client.search_knowledge_base(query.strip(), options)
     res = st.session_state.get("search_result")
     if not res:
         return
     if not res["success"]:
-        st.error(f"Error en la búsqueda: {res.get('error')}")
+        st.error(t("search_error", error=res.get("error")))
         return
     data = res["data"] or {}
     render_diagnostics(data.get("diagnostics"))
     results = data.get("results") or []
     if not results:
-        st.info("Sin resultados.")
+        st.info(t("search_empty"))
         return
     st.dataframe(
         pd.DataFrame(
             [
                 {
                     "#": r.get("rank"),
-                    "Documento": r.get("document_name"),
-                    "Pág.": r.get("page_number"),
-                    "Tipo": r.get("chunk_type"),
+                    t("col_document"): r.get("document_name"),
+                    t("col_page"): r.get("page_number"),
+                    t("col_type"): r.get("chunk_type"),
                     "Score": r.get("score"),
                     "Rerank": r.get("rerank_score"),
-                    "Contenido": str(r.get("content", ""))[:300],
+                    t("col_content"): str(r.get("content", ""))[:300],
                 }
                 for r in results
             ]
         ),
         hide_index=True,
-        alt="Fragmentos recuperados",
+        alt=t("search_alt"),
     )

@@ -234,6 +234,7 @@ def test_chat_stream_payload_includes_sidebar_hyperparameters(fake_api):
         "temperature": 0.7,
         "max_turns": 3,
         "filter_document_id": DOC_ID,
+        "language": "es",
     }
 
 
@@ -443,3 +444,100 @@ def test_diagnostics_rows_skip_missing_and_invalid_fields(fake_api):
     assert diagnostics_rows(None) == []
     assert diagnostics_rows("garbage") == []
     assert diagnostics_rows({"dense_ms": "x", "rerank_ms": 2, "sparse_ms": True}) == [{"Etapa": "Reranking", "ms": 2.0}]
+
+
+# ------------------------------------------------------------------------------ i18n (es/en)
+def switch_language(at: AppTest, lang: str) -> AppTest:
+    at.get_by_key("lang").set_value(lang)
+    return at.run()
+
+
+def test_i18n_dictionaries_have_identical_keys(fake_api):
+    from i18n import TRANSLATIONS
+
+    assert set(TRANSLATIONS) == {"es", "en"}
+    assert set(TRANSLATIONS["es"]) == set(TRANSLATIONS["en"])
+    assert all(TRANSLATIONS["en"].values()) and all(TRANSLATIONS["es"].values())
+
+
+def test_i18n_t_falls_back_to_spanish_then_key(fake_api, monkeypatch):
+    import i18n
+
+    assert i18n.t("sessions_header") == "Sesiones"  # no session state outside a run: Spanish
+    monkeypatch.setattr(i18n, "current_lang", lambda: "en")
+    assert i18n.t("sessions_header") == "Sessions"
+    assert i18n.t("session_label", title="T", count=2) == "T · 2 msgs"
+    monkeypatch.setitem(i18n.TRANSLATIONS, "en", {})
+    assert i18n.t("sessions_header") == "Sesiones"  # missing in English: Spanish fallback
+    assert i18n.t("missing_key_xyz") == "missing_key_xyz"
+
+
+def test_dashboard_defaults_to_spanish(fake_api):
+    at = run_app()
+
+    assert not at.exception
+    assert at.get_by_key("lang").value == "es"
+    assert at.sidebar.title[0].value == "⚙️ Panel de Control"
+    assert "Escribe tu consulta" in at.chat_input[0].placeholder
+
+
+def test_language_selector_switches_texts_to_english(fake_api):
+    at = run_app()
+    at = switch_language(at, "en")
+
+    assert not at.exception
+    assert at.session_state["lang"] == "en"
+    assert at.sidebar.title[0].value == "⚙️ Control Panel"
+    assert "Sessions" in [s.value for s in at.sidebar.subheader]
+    assert "Autonomous AI Agent" in all_text(at)
+    view_options = [option.content for option in at.get_by_key("main_view").proto.options]
+    assert view_options == ["Chat", "RAG Search", "Benchmark Lab"]
+
+    at = switch_language(at, "es")
+    assert at.sidebar.title[0].value == "⚙️ Panel de Control"
+
+
+def test_benchmark_lab_renders_in_english(fake_api):
+    fake_api.set("POST", "/api/v1/demo/evaluate", 200, EVALUATION)
+    at = switch_language(run_app(), "en")
+    at.get_by_key("main_view").set_value("Benchmark Lab").run()
+    at.button(key="run_benchmark").click().run()
+
+    assert not at.exception
+    assert at.button(key="run_benchmark").label == "Run benchmark"
+    subheaders = [s.value for s in at.subheader]
+    assert "Retrieval quality" in subheaders and "Average latency" in subheaders
+    summary = at.dataframe[0].value
+    assert list(summary["Mode"]) == ["dense", "sparse", "hybrid"]
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_chat_payload_sends_selected_language(fake_api, lang):
+    at = switch_language(run_app(SESSION_ID), lang)
+    at.chat_input[0].set_value("hola").run()
+
+    assert not at.exception
+    assert fake_api.stream_calls[0]["json"]["language"] == lang
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_benchmark_evaluate_sends_lang_query(fake_api, lang):
+    fake_api.set("POST", "/api/v1/demo/evaluate", 200, EVALUATION)
+    at = switch_language(run_app(), lang)
+    at.get_by_key("main_view").set_value("Benchmark Lab").run()
+    at.button(key="run_benchmark").click().run()
+
+    assert not at.exception
+    evaluate_calls = [kw for m, p, kw in fake_api.calls if (m, p) == ("POST", "/api/v1/demo/evaluate")]
+    assert evaluate_calls[0]["params"] == {"lang": lang}
+    assert evaluate_calls[0]["json"] == {"top_k": 5}
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_session_export_sends_lang_query(fake_api, lang):
+    import api_client
+
+    fake_api.set("GET", f"/api/v1/agent/sessions/{SESSION_ID}/export", 200, b"# export")
+    assert api_client.export_session(SESSION_ID, "markdown", lang) == b"# export"
+    export_calls = [kw for m, p, kw in fake_api.calls if p.endswith("/export")]
+    assert export_calls[0]["params"] == {"format": "markdown", "lang": lang}

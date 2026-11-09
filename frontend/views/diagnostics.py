@@ -4,14 +4,15 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
+from i18n import t
 
-# (SearchDiagnostics field, Spanish label) in pipeline order.
+# (SearchDiagnostics field, i18n label key) in pipeline order.
 STAGES = (
-    ("embedding_ms", "Embedding"),
-    ("dense_ms", "Densa (vector)"),
-    ("sparse_ms", "Léxica (BM25)"),
-    ("rrf_fusion_ms", "Fusión RRF"),
-    ("rerank_ms", "Reranking"),
+    ("embedding_ms", "stage_embedding"),
+    ("dense_ms", "stage_dense"),
+    ("sparse_ms", "stage_sparse"),
+    ("rrf_fusion_ms", "stage_rrf"),
+    ("rerank_ms", "stage_rerank"),
 )
 
 
@@ -29,10 +30,11 @@ def diagnostics_rows(diagnostics: Any) -> list[dict[str, Any]]:
     if not isinstance(diagnostics, dict):
         return []
     rows = []
-    for field, label in STAGES:
+    stage_col = t("diag_col_stage")
+    for field, label_key in STAGES:
         value = _as_float(diagnostics.get(field))
         if value is not None:
-            rows.append({"Etapa": label, "ms": round(value, 2)})
+            rows.append({stage_col: t(label_key), "ms": round(value, 2)})
     return rows
 
 
@@ -55,38 +57,41 @@ def render_diagnostics(diagnostics: Any, *, duration_ms: Any = None, tool_events
     """Renders the X-ray; tolerates `None`, partial dicts and malformed values."""
     rows = diagnostics_rows(diagnostics)
     diag = diagnostics if isinstance(diagnostics, dict) else {}
-    tools = [t for t in tool_events or [] if isinstance(t, dict)]
+    tools = [tool for tool in tool_events or [] if isinstance(tool, dict)]
     if not rows and duration_ms is None and not tools:
-        st.caption("Sin diagnósticos de latencia para esta respuesta.")
+        st.caption(t("diag_none"))
         return
 
     with st.container(horizontal=True):
-        st.metric("Búsqueda total", _fmt_ms(diag.get("total_ms")), border=True)
+        st.metric(t("diag_search_total"), _fmt_ms(diag.get("total_ms")), border=True)
         if duration_ms is not None:
-            st.metric("Turno completo", _fmt_ms(duration_ms), border=True)
-        st.metric("Base de datos", str(diag.get("db_dialect") or "—"), border=True)
+            st.metric(t("diag_turn_total"), _fmt_ms(duration_ms), border=True)
+        st.metric(t("diag_database"), str(diag.get("db_dialect") or "—"), border=True)
         candidates = f"{diag.get('raw_candidates_count', '—')} / {diag.get('deduped_blocks_count', '—')}"
-        st.metric("Candidatos / bloques", candidates, border=True)
+        st.metric(t("diag_candidates"), candidates, border=True)
 
     if rows:
         st.bar_chart(
             pd.DataFrame(rows),
-            x="Etapa",
+            x=t("diag_col_stage"),
             y="ms",
             horizontal=True,
             sort=False,
-            x_label="Milisegundos",
+            x_label=t("diag_x_label"),
             y_label="",
-            alt="Latencia por etapa de la búsqueda RAG",
+            alt=t("diag_alt"),
         )
     if tools:
         st.dataframe(
             pd.DataFrame(
                 [
-                    {"Herramienta": str(t.get("tool_name", "?")), "Duración": _fmt_ms(t.get("duration_ms"))}
-                    for t in tools
+                    {
+                        t("diag_col_tool"): str(tool.get("tool_name", "?")),
+                        t("diag_col_duration"): _fmt_ms(tool.get("duration_ms")),
+                    }
+                    for tool in tools
                 ]
             ),
             hide_index=True,
-            alt="Duración de cada herramienta ejecutada",
+            alt=t("diag_tools_alt"),
         )

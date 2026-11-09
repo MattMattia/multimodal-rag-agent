@@ -1,14 +1,29 @@
-"""Sidebar: API health, sessions, hyperparameters, Golden Corpus, ingestion and document catalog."""
+"""Sidebar: language selector, API health, sessions, hyperparameters, Golden Corpus, ingestion and document catalog."""
 
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 import api_client
 import streamlit as st
+from i18n import DEFAULT_LANG, LANG_KEY, LANGUAGES, current_lang, t
 
 SEARCH_MODES = ("hybrid", "dense", "sparse")
 ALL_DOCUMENTS = "__all__"
 TITLE_PREVIEW_CHARS = 48
+
+
+# ---------------------------------------------------------------------------- language
+def render_language_selector() -> None:
+    """Compact es/en selector bound to `st.session_state.lang`; the change applies on the same rerun."""
+    st.segmented_control(
+        t("lang_label"),
+        list(LANGUAGES),
+        format_func=LANGUAGES.__getitem__,
+        default=DEFAULT_LANG,
+        required=True,
+        key=LANG_KEY,
+    )
 
 
 # ---------------------------------------------------------------------------- sessions
@@ -23,26 +38,31 @@ def _on_session_picked() -> None:
 def _delete_current_session() -> None:
     res = api_client.delete_session(st.session_state.session_id)
     if res["success"] or res.get("status_code") == 404:
-        st.session_state.flash = ("success", "Sesión eliminada.")
+        st.session_state.flash = ("success", t("session_deleted"))
         _start_new_session()
     else:
-        st.session_state.flash = ("error", f"No se pudo eliminar la sesión: {res.get('error')}")
+        st.session_state.flash = ("error", t("session_delete_failed", error=res.get("error")))
+
+
+def _labels_formatter(labels: dict[str, str]) -> Callable[[str], str]:
+    """`format_func` over labels translated at render time (stable even if called outside the script run)."""
+    return lambda option: labels.get(option, str(option))
 
 
 def _session_label(session: dict[str, Any] | None) -> str:
     if session is None:
-        return "Nueva sesión (sin mensajes)"
-    title = str(session.get("title") or "Sin título")
+        return t("session_new")
+    title = str(session.get("title") or t("session_untitled"))
     if len(title) > TITLE_PREVIEW_CHARS:
         title = title[:TITLE_PREVIEW_CHARS] + "…"
-    return f"{title} · {session.get('message_count', 0)} msgs"
+    return t("session_label", title=title, count=session.get("message_count", 0))
 
 
 def render_sessions() -> None:
-    st.subheader("Sesiones", anchor=False)
+    st.subheader(t("sessions_header"), anchor=False)
     sessions = api_client.list_sessions()
     if sessions is None:
-        st.caption("El listado de sesiones no está disponible en esta API.")
+        st.caption(t("sessions_unavailable"))
         sessions = []
     by_id = {str(s.get("session_id")): s for s in sessions if isinstance(s, dict)}
     current = st.session_state.session_id
@@ -50,27 +70,28 @@ def render_sessions() -> None:
 
     st.session_state.session_picker = current
     st.selectbox(
-        "Sesión activa",
+        t("session_active"),
         options=options,
-        format_func=lambda sid: _session_label(by_id.get(sid)),
+        format_func=_labels_formatter({sid: _session_label(by_id.get(sid)) for sid in options}),
         key="session_picker",
         on_change=_on_session_picked,
     )
     persisted = current in by_id
     with st.container(horizontal=True):
-        st.button("Nueva", icon=":material/add:", key="new_session", on_click=_start_new_session)
+        st.button(t("session_btn_new"), icon=":material/add:", key="new_session", on_click=_start_new_session)
         st.button(
-            "Eliminar",
+            t("session_btn_delete"),
             icon=":material/delete:",
             key="delete_session",
             on_click=_delete_current_session,
             disabled=not persisted,
         )
     if persisted:
+        lang = current_lang()
         with st.container(horizontal=True):
             st.download_button(
                 "Markdown",
-                data=lambda: api_client.export_session(current, "markdown"),
+                data=lambda: api_client.export_session(current, "markdown", lang),
                 file_name=f"session-{current}.md",
                 mime="text/markdown",
                 icon=":material/description:",
@@ -79,37 +100,37 @@ def render_sessions() -> None:
             )
             st.download_button(
                 "PDF",
-                data=lambda: api_client.export_session(current, "pdf"),
+                data=lambda: api_client.export_session(current, "pdf", lang),
                 file_name=f"session-{current}.pdf",
                 mime="application/pdf",
                 icon=":material/picture_as_pdf:",
                 key="export_pdf",
                 on_click="ignore",
             )
-    st.caption(f"ID: `{current}`")
+    st.caption(t("session_id", session_id=current))
 
 
 # ---------------------------------------------------------------------------- hyperparameters
 def render_hyperparameters(documents: list[dict[str, Any]]) -> api_client.ChatOptions:
-    with st.expander("Hiperparámetros del agente", icon=":material/tune:"):
+    with st.expander(t("hp_title"), icon=":material/tune:"):
         mode = st.segmented_control(
-            "Modo de búsqueda", SEARCH_MODES, default="hybrid", required=True, key="hp_search_mode"
+            t("hp_search_mode"), SEARCH_MODES, default="hybrid", required=True, key="hp_search_mode"
         )
-        top_k = st.slider("Fragmentos (top_k)", min_value=1, max_value=50, value=5, key="hp_top_k")
-        rerank = st.toggle("Reranking semántico", value=True, key="hp_enable_rerank")
-        override = st.toggle("Personalizar temperatura y turnos", value=False, key="hp_override")
+        top_k = st.slider(t("hp_top_k"), min_value=1, max_value=50, value=5, key="hp_top_k")
+        rerank = st.toggle(t("hp_rerank"), value=True, key="hp_enable_rerank")
+        override = st.toggle(t("hp_override"), value=False, key="hp_override")
         temperature = st.slider(
-            "Temperatura", min_value=0.0, max_value=2.0, value=0.2, step=0.1, key="hp_temperature",
+            t("hp_temperature"), min_value=0.0, max_value=2.0, value=0.2, step=0.1, key="hp_temperature",
             disabled=not override,
         )
         max_turns = st.slider(
-            "Máx. iteraciones ReAct", min_value=1, max_value=10, value=5, key="hp_max_turns", disabled=not override
+            t("hp_max_turns"), min_value=1, max_value=10, value=5, key="hp_max_turns", disabled=not override
         )
         doc_names = {str(d.get("id")): str(d.get("filename", d.get("id"))) for d in documents if d.get("id")}
         doc_filter = st.selectbox(
-            "Restringir a documento",
+            t("hp_doc_filter"),
             options=[ALL_DOCUMENTS, *doc_names],
-            format_func=lambda doc_id: "Todos los documentos" if doc_id == ALL_DOCUMENTS else doc_names[doc_id],
+            format_func=_labels_formatter({ALL_DOCUMENTS: t("hp_all_docs"), **doc_names}),
             key="hp_filter_document_id",
         )
     return api_client.ChatOptions(
@@ -119,6 +140,7 @@ def render_hyperparameters(documents: list[dict[str, Any]]) -> api_client.ChatOp
         temperature=float(temperature) if override else None,
         max_turns=int(max_turns) if override else None,
         filter_document_id=None if doc_filter in (None, ALL_DOCUMENTS) else doc_filter,
+        language=current_lang(),
     )
 
 
@@ -129,31 +151,44 @@ def _restore_corpus() -> None:
         data = res["data"] or {}
         st.session_state.flash = (
             "success",
-            f"Golden Corpus restaurado: {data.get('documents_created', 0)} documentos nuevos, "
-            f"{data.get('documents_skipped', 0)} existentes ({data.get('duration_ms', 0)} ms).",
+            t(
+                "corpus_restored",
+                created=data.get("documents_created", 0),
+                skipped=data.get("documents_skipped", 0),
+                duration=data.get("duration_ms", 0),
+            ),
         )
         st.session_state.cached_docs = api_client.fetch_documents()
     else:
-        st.session_state.flash = ("error", f"No se pudo restaurar el Golden Corpus: {res.get('error')}")
+        st.session_state.flash = ("error", t("corpus_restore_failed", error=res.get("error")))
 
 
 def render_golden_corpus() -> None:
-    st.subheader("Golden Corpus", anchor=False)
+    st.subheader(t("corpus_header"), anchor=False)
     res = api_client.demo_status()
     if res["success"] and isinstance(res["data"], dict):
         status = res["data"]
-        seeded = "Sembrado" if status.get("demo_seeded") else "Sin sembrar"
+        seeded = t("corpus_seeded") if status.get("demo_seeded") else t("corpus_unseeded")
         st.markdown(
-            f"**{seeded}** · BD `{status.get('db_dialect', '?')}` · embeddings `{status.get('embedding_mode', '?')}`"
+            t(
+                "corpus_status",
+                seeded=seeded,
+                db=status.get("db_dialect", "?"),
+                embeddings=status.get("embedding_mode", "?"),
+            )
         )
         st.caption(
-            f"{status.get('total_documents', 0)} documentos · {status.get('total_chunks', 0)} chunks · "
-            f"{status.get('total_images', 0)} imágenes"
+            t(
+                "corpus_counts",
+                documents=status.get("total_documents", 0),
+                chunks=status.get("total_chunks", 0),
+                images=status.get("total_images", 0),
+            )
         )
     else:
-        st.caption(f"Estado del demo no disponible ({res.get('error')}).")
+        st.caption(t("corpus_status_unavailable", error=res.get("error")))
     st.button(
-        "Restaurar Golden Corpus",
+        t("corpus_restore_btn"),
         icon=":material/restore:",
         key="restore_corpus",
         on_click=_restore_corpus,
@@ -163,37 +198,37 @@ def render_golden_corpus() -> None:
 
 # ---------------------------------------------------------------------------- ingestion / catalog
 def render_ingestion() -> None:
-    st.subheader("Ingesta de documentos", anchor=False)
-    st.caption("Sube PDFs o imágenes (facturas, diagramas, CVs).")
+    st.subheader(t("ingest_header"), anchor=False)
+    st.caption(t("ingest_caption"))
     uploaded_file = st.file_uploader(
-        "Selecciona un archivo", type=["pdf", "png", "jpg", "jpeg"], label_visibility="collapsed"
+        t("ingest_uploader"), type=["pdf", "png", "jpg", "jpeg"], label_visibility="collapsed"
     )
-    if uploaded_file is not None and st.button("Subir e indexar", icon=":material/upload:", width="stretch"):
-        with st.spinner(f"Ingestando '{uploaded_file.name}'..."):
+    if uploaded_file is not None and st.button(t("ingest_btn"), icon=":material/upload:", width="stretch"):
+        with st.spinner(t("ingest_spinner", name=uploaded_file.name)):
             res = api_client.upload_document_api(uploaded_file.getvalue(), uploaded_file.name)
         if res.get("success"):
-            st.success("Archivo subido y encolado para procesamiento.")
+            st.success(t("ingest_ok"))
             st.session_state.cached_docs = api_client.fetch_documents()
             st.rerun()
         else:
-            st.error(f"Error al subir: {res.get('error')}")
+            st.error(t("ingest_failed", error=res.get("error")))
 
 
 def render_catalog() -> None:
-    st.subheader("Documentos en base de datos", anchor=False)
-    if st.button("Actualizar documentos", icon=":material/refresh:", width="stretch"):
+    st.subheader(t("catalog_header"), anchor=False)
+    if st.button(t("catalog_refresh"), icon=":material/refresh:", width="stretch"):
         st.session_state.cached_docs = api_client.fetch_documents()
     docs = st.session_state.cached_docs
     if not docs:
-        st.info("No hay documentos indexados aún.")
+        st.info(t("catalog_empty"))
         return
-    st.caption(f"Total indexados: {len(docs)}")
+    st.caption(t("catalog_total", count=len(docs)))
     for doc in docs:
         status = doc.get("status", "pending")
         status_emoji = "🟢" if status == "completed" else "🟡" if status == "processing" else "🔴"
         with st.expander(f"{status_emoji} {doc.get('filename')}"):
-            st.write(f"**Tipo:** {doc.get('file_type')}")
-            st.write(f"**Estado:** `{status}`")
-            st.write(f"**Fragmentos (Chunks):** {doc.get('total_chunks', 0)}")
-            st.write(f"**Fecha:** {str(doc.get('upload_date', ''))[:19]}")
+            st.write(t("doc_type", value=doc.get("file_type")))
+            st.write(t("doc_status", value=status))
+            st.write(t("doc_chunks", value=doc.get("total_chunks", 0)))
+            st.write(t("doc_date", value=str(doc.get("upload_date", ""))[:19]))
             st.code(f"ID: {doc.get('id')}", language="text")

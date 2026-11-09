@@ -2,13 +2,14 @@ import uuid
 
 import api_client
 import streamlit as st
+from i18n import t
 from views import benchmark, chat, sidebar
 
 # ==============================================================================
 # CONFIGURACIÓN GENERAL Y ESTILOS
 # ==============================================================================
 st.set_page_config(
-    page_title="RAG Multimodal & Agente IA Autónomo",
+    page_title=t("page_title"),
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -36,9 +37,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Stable option ids (language independent); the visible label comes from `VIEW_LABELS`.
 VIEW_CHAT = "Chat"
 VIEW_SEARCH = "Búsqueda RAG"
 VIEW_BENCHMARK = "Benchmark Lab"
+VIEW_LABELS = {VIEW_CHAT: "view_chat", VIEW_SEARCH: "view_search", VIEW_BENCHMARK: "view_benchmark"}
 
 # ==============================================================================
 # INICIALIZACIÓN DEL ESTADO DE SESIÓN
@@ -54,14 +57,15 @@ if not st.session_state.cached_docs:
 # PANEL LATERAL (SIDEBAR)
 # ==============================================================================
 with st.sidebar:
-    st.title("⚙️ Panel de Control")
-    st.caption("Sistema RAG Multimodal & Agente IA")
+    sidebar.render_language_selector()
+    st.title(t("sidebar_title"))
+    st.caption(t("sidebar_caption"))
 
     health = api_client.check_api_health()
     if health.get("status") == "ok":
-        st.success(f"🟢 **API Conectada** ({health.get('environment', 'dev')})")
+        st.success(t("api_ok", environment=health.get("environment", "dev")))
     else:
-        st.error("🔴 **API No Disponible** (Verifica contenedor `rag_api`)")
+        st.error(t("api_down"))
 
     st.divider()
     sidebar.render_sessions()
@@ -84,16 +88,13 @@ if flash:
 # ==============================================================================
 # ÁREA PRINCIPAL
 # ==============================================================================
-st.markdown('<div class="main-title">🤖 Agente IA Autónomo & RAG Multimodal</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="sub-title">Motor con razonamiento ReAct, búsqueda híbrida (pgvector / SQLite), '
-    "generación de informes ejecutivos en PDF y memoria conversacional persistente.</div>",
-    unsafe_allow_html=True,
-)
+st.markdown(f'<div class="main-title">{t("main_title")}</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="sub-title">{t("main_subtitle")}</div>', unsafe_allow_html=True)
 
 view = st.segmented_control(
-    "Vista",
+    t("view_label"),
     [VIEW_CHAT, VIEW_SEARCH, VIEW_BENCHMARK],
+    format_func={option: t(label_key) for option, label_key in VIEW_LABELS.items()}.__getitem__,
     default=VIEW_CHAT,
     required=True,
     key="main_view",
@@ -105,23 +106,18 @@ if view == VIEW_BENCHMARK:
 elif view == VIEW_SEARCH:
     chat.render_search_lab(chat_options)
 else:
-    with st.expander("💡 Ejemplos de instrucciones para interactuar con el agente", expanded=False):
+    with st.expander(t("examples_title"), expanded=False):
         col_e1, col_e2, col_e3 = st.columns(3)
         with col_e1:
-            st.info("🔍 **Consulta de Datos / CVs:**\n\n'¿Quién es Mattia Risso y qué experiencia técnica tiene?'")
+            st.info(t("example_data"))
         with col_e2:
-            st.info(
-                "📄 **Generación de Reportes:**\n\n"
-                "'Genera un reporte PDF con el resumen ejecutivo de la auditoría y sus conclusiones.'"
-            )
+            st.info(t("example_report"))
         with col_e3:
-            st.info(
-                "🔔 **Notificación / Webhook:**\n\n'Notifica por webhook que se aprobó la factura INV-1002 por $1500.'"
-            )
+            st.info(t("example_webhook"))
 
     chat.render_history(st.session_state.session_id)
     chat.render_last_turn()
 
-    user_input = st.chat_input("Escribe tu consulta o instrucción para el Agente IA...")
+    user_input = st.chat_input(t("chat_placeholder"))
     if user_input:
         chat.handle_user_input(user_input, st.session_state.session_id, chat_options)

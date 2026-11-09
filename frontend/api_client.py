@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 import streamlit as st
+from i18n import DEFAULT_LANG, t
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 PUBLIC_API_URL = os.getenv("PUBLIC_API_URL", "http://localhost:8000")
@@ -37,6 +38,7 @@ class ChatOptions:
     temperature: float | None = None
     max_turns: int | None = None
     filter_document_id: str | None = None
+    language: str = DEFAULT_LANG  # UI language (`es`/`en`) the agent answers in
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -66,7 +68,7 @@ def _call(method: str, path: str, *, timeout: float = SHORT_TIMEOUT, raw: bool =
     try:
         resp = httpx.request(method, f"{API_URL}{path}", headers=API_HEADERS, timeout=timeout, **kwargs)
     except httpx.HTTPError as exc:
-        return _result(False, error=f"Error de conexión: {exc}")
+        return _result(False, error=t("err_connection", error=exc))
     if not resp.is_success:
         return _result(False, error=_error_text(resp), status_code=resp.status_code)
     if raw:
@@ -76,7 +78,7 @@ def _call(method: str, path: str, *, timeout: float = SHORT_TIMEOUT, raw: bool =
     try:
         return _result(True, data=resp.json(), status_code=resp.status_code)
     except ValueError:
-        return _result(False, error="Respuesta no JSON del servidor", status_code=resp.status_code)
+        return _result(False, error=t("err_non_json"), status_code=resp.status_code)
 
 
 # ---------------------------------------------------------------------------- health / documents
@@ -121,14 +123,14 @@ def delete_session(session_id: str) -> dict[str, Any]:
     return _call("DELETE", f"{API_PREFIX}/agent/sessions/{session_id}")
 
 
-def export_session(session_id: str, export_format: str) -> bytes:
-    """Markdown or PDF export; returns an empty payload on failure (used as a lazy download callable)."""
+def export_session(session_id: str, export_format: str, lang: str) -> bytes:
+    """Markdown or PDF export with labels in `lang`; returns an empty payload on failure (used as a lazy download callable)."""
     res = _call(
         "GET",
         f"{API_PREFIX}/agent/sessions/{session_id}/export",
         timeout=UPLOAD_TIMEOUT,
         raw=True,
-        params={"format": export_format},
+        params={"format": export_format, "lang": lang},
     )
     return res["data"] if res["success"] else b""
 
@@ -167,7 +169,7 @@ def stream_chat_response(
             if response.status_code != 200:
                 err_text = response.read().decode("utf-8", errors="ignore")[:ERROR_PREVIEW_CHARS]
                 metadata_container["error"] = f"HTTP {response.status_code}: {err_text}"
-                yield f"⚠️ Error del servidor ({response.status_code}): {err_text}"
+                yield t("err_stream_server", status=response.status_code, text=err_text)
                 return
             for line in response.iter_lines():
                 event = _parse_sse_line(line)
@@ -182,7 +184,7 @@ def stream_chat_response(
                     metadata_container.update(event)
     except httpx.HTTPError as exc:
         metadata_container["error"] = str(exc)
-        yield f"\n\n⚠️ Error de conexión durante la transmisión en streaming: {exc}"
+        yield t("err_stream_connection", error=exc)
 
 
 def _parse_sse_line(line: str) -> dict[str, Any] | None:
@@ -208,5 +210,12 @@ def seed_demo() -> dict[str, Any]:
     return _call("POST", f"{API_PREFIX}/demo/seed", timeout=UPLOAD_TIMEOUT)
 
 
-def evaluate_retrieval(top_k: int) -> dict[str, Any]:
-    return _call("POST", f"{API_PREFIX}/demo/evaluate", timeout=EVALUATE_TIMEOUT, json={"top_k": top_k})
+def evaluate_retrieval(top_k: int, lang: str) -> dict[str, Any]:
+    """Benchmark of the three search modes; `lang` localizes the backend warnings."""
+    return _call(
+        "POST",
+        f"{API_PREFIX}/demo/evaluate",
+        timeout=EVALUATE_TIMEOUT,
+        json={"top_k": top_k},
+        params={"lang": lang},
+    )
