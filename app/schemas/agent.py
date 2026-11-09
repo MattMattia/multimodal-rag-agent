@@ -59,6 +59,11 @@ class AgentChatRequest(BaseModel):
         default=None, ge=1, le=10, description="Máximo de iteraciones ReAct (por defecto AGENT_MAX_TURNS)"
     )
 
+    language: Literal["es", "en", "auto"] = Field(
+        "auto",
+        description="Idioma de la respuesta: 'es', 'en' o 'auto' (se detecta a partir del mensaje; 'es' si es indecidible)",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -80,6 +85,7 @@ class AgentChatRequest(BaseModel):
             enable_rerank=self.enable_rerank,
             temperature=self.temperature,
             max_turns=self.max_turns,
+            language=self.language,
         )
 
 
@@ -93,6 +99,7 @@ class AgentOptions:
     enable_rerank: bool = True
     temperature: float | None = None
     max_turns: int | None = None
+    language: str = "auto"
 
 
 class AgentChatResponse(BaseModel):

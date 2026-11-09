@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.i18n import EVAL_MOCK_WARNING, normalize_lang
 from app.models.document import Document, DocumentChunk
 from app.schemas.search import SearchRequest
 from app.services.rag_search import HybridSearchService, hybrid_search_service
@@ -134,7 +135,9 @@ class RAGEvaluationService:
         self.search_service = search_service or hybrid_search_service
         self.queries = queries if queries is not None else GOLDEN_EVAL_QUERIES
 
-    async def evaluate(self, db: AsyncSession, top_k: int = 5, modes: Sequence[str] = MODES) -> dict[str, Any]:
+    async def evaluate(
+        self, db: AsyncSession, top_k: int = 5, modes: Sequence[str] = MODES, lang: str = "es"
+    ) -> dict[str, Any]:
         from app.services.demo_seeder import gemini_configured
 
         embedding_mode = "gemini" if gemini_configured() else "mock"
@@ -146,10 +149,7 @@ class RAGEvaluationService:
             "modes": {},
         }
         if embedding_mode == "mock":
-            report["warnings"].append(
-                "Embeddings simulados: los puntajes de dense y hybrid provienen de vectores determinísticos SHA-256 "
-                "(mock) y no miden calidad semántica; solo sparse (BM25) es significativo sin GOOGLE_API_KEY."
-            )
+            report["warnings"].append(EVAL_MOCK_WARNING[normalize_lang(lang)])
         totals = [await self._count_relevant_blocks(db, spec) for spec in self.queries]
         for mode in modes:
             rows = [

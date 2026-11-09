@@ -37,7 +37,7 @@ def no_langfuse():
 # PERF-01: blocking work runs off the event loop
 # ---------------------------------------------------------------------------
 def _thread_recording_pdf(threads: list[int]):
-    def fake_pdf(title, summary, key_points=None, sections=None):
+    def fake_pdf(title, summary, key_points=None, sections=None, language="es"):
         threads.append(threading.get_ident())
         return {"status": "success", "download_url": "/uploads/reports/x.pdf", "file_path": "x.pdf", "filename": "x.pdf"}
 

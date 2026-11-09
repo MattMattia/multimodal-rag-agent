@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.i18n import labels as i18n_labels
 from app.core.security import error_detail
 from app.core.telemetry import telemetry_service
 from app.models.chat import ChatMessage
@@ -199,19 +200,20 @@ def _message_dict(msg: ChatMessage) -> dict[str, Any]:
     }
 
 
-def _conversation_markdown(session_id: uuid.UUID, messages: list[dict[str, Any]]) -> str:
-    lines = [f"# Conversación {session_id}", ""]
+def _conversation_markdown(session_id: uuid.UUID, messages: list[dict[str, Any]], lang: str = "es") -> str:
+    lbl = i18n_labels(lang)
+    lines = [f"# {lbl['session_export']} {session_id}", ""]
     for msg in messages:
-        label = {"user": "Usuario", "assistant": "Agente"}.get(msg["role"], msg["role"])
+        label = {"user": lbl["user"], "assistant": lbl["agent"]}.get(msg["role"], msg["role"])
         lines += [f"## {label} ({msg['created_at'].isoformat()})", "", msg["content"], ""]
         if msg["citations"]:
-            lines.append("**Fuentes:**")
+            lines.append(f"**{lbl['cited_sources']}:**")
             for cit in msg["citations"]:
-                page = f", Pág {cit['page_number']}" if cit.get("page_number") else ""
+                page = f", {lbl['page']} {cit['page_number']}" if cit.get("page_number") else ""
                 lines.append(f"- {cit.get('document_name', '?')}{page}")
             lines.append("")
         if msg["executed_tools"]:
-            lines.append("**Herramientas ejecutadas:**")
+            lines.append(f"**{lbl['executed_tools']}:**")
             lines += [f"- `{tool.get('tool_name', '?')}`" for tool in msg["executed_tools"]]
             lines.append("")
     return "\n".join(lines)
@@ -224,6 +226,7 @@ def _conversation_markdown(session_id: uuid.UUID, messages: list[dict[str, Any]]
 async def export_session(
     session_id: uuid.UUID,
     format: Literal["markdown", "pdf"] = Query("markdown"),
+    lang: Literal["es", "en"] = Query("es", description="Idioma de las etiquetas del documento exportado"),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -234,14 +237,14 @@ async def export_session(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesión no encontrada.")
 
     if format == "pdf":
-        pdf_bytes = await asyncio.to_thread(build_conversation_pdf, session_id, messages)
+        pdf_bytes = await asyncio.to_thread(build_conversation_pdf, session_id, messages, lang)
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="session-{session_id}.pdf"'},
         )
     return Response(
-        content=_conversation_markdown(session_id, messages),
+        content=_conversation_markdown(session_id, messages, lang),
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="session-{session_id}.md"'},
     )

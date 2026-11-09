@@ -908,6 +908,22 @@
             }
           },
           {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "es",
+                "en"
+              ],
+              "type": "string",
+              "description": "Idioma de las etiquetas del documento exportado",
+              "default": "es",
+              "title": "Lang"
+            },
+            "description": "Idioma de las etiquetas del documento exportado"
+          },
+          {
             "name": "x-api-key",
             "in": "header",
             "required": false,
@@ -1294,6 +1310,22 @@
         "operationId": "evaluate_retrieval_api_v1_demo_evaluate_post",
         "parameters": [
           {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "es",
+                "en"
+              ],
+              "type": "string",
+              "description": "Idioma de las advertencias del informe",
+              "default": "es",
+              "title": "Lang"
+            },
+            "description": "Idioma de las advertencias del informe"
+          },
+          {
             "name": "x-api-key",
             "in": "header",
             "required": false,
@@ -1440,6 +1472,17 @@
             ],
             "title": "Max Turns",
             "description": "Máximo de iteraciones ReAct (por defecto AGENT_MAX_TURNS)"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "es",
+              "en",
+              "auto"
+            ],
+            "title": "Language",
+            "description": "Idioma de la respuesta: 'es', 'en' o 'auto' (se detecta a partir del mensaje; 'es' si es indecidible)",
+            "default": "auto"
           }
         },
         "type": "object",

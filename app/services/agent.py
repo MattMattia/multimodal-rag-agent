@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import dataclasses
 import json
 import logging
 import os
@@ -14,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.i18n import fallback_texts, language_instruction, normalize_lang, resolve_language
 from app.core.telemetry import DummyTrace, telemetry_service
 from app.models.chat import ChatMessage
 from app.schemas.agent import AgentChatResponse, AgentOptions, CitationItem, ToolExecutionRecord
@@ -58,6 +60,21 @@ Reglas esenciales:
 
 # Separador visible cuando Gemini falla tras haber transmitido tokens y el motor de contingencia continúa
 STREAM_FALLBACK_SEPARATOR = "\n\n[Se cambió al motor de contingencia]\n\n"
+
+
+def _system_instruction(language: str) -> str:
+    """Prompt del sistema con la instrucción explícita del idioma de respuesta (es/en)."""
+    return f"{SYSTEM_INSTRUCTION}\n{language_instruction(language)}\n"
+
+
+def _with_language(options: AgentOptions | None, user_message: str) -> AgentOptions:
+    """Resuelve 'auto' a un idioma efectivo (es/en) y lo fija en las opciones del turno."""
+    base = options or AgentOptions()
+    return dataclasses.replace(base, language=resolve_language(base.language, user_message))
+
+
+def _options_language(options: AgentOptions | None) -> str:
+    return normalize_lang(options.language if options is not None else None)
 
 
 def _trace_metadata(trace: Any) -> dict[str, Any]:
@@ -245,6 +262,7 @@ class AutonomousAgentService:
         """Ejecuta un turno completo de interacción con el agente autónomo y persiste la memoria en PostgreSQL."""
         turn_started = time.perf_counter()
         active_session_id = session_id or uuid.uuid4()
+        options = _with_language(options, user_message)
 
         # Iniciar traza raíz de telemetría (Langfuse)
         trace = telemetry_service.start_trace(
@@ -298,9 +316,8 @@ class AutonomousAgentService:
                 )
             except Exception as e:
                 logger.error("Error crítico al invocar la API de Gemini: %s", e, exc_info=True)
-                error_prefix = (
-                    f"⚠️ [Aviso del sistema: La API de Gemini no respondió temporalmente ({type(e).__name__}: {str(e)[:120]}...). "
-                    "Se ejecutó el procesamiento documental con el motor de contingencia.]\n\n"
+                error_prefix = fallback_texts(options.language)["gemini_notice"].format(
+                    error_type=type(e).__name__, error=str(e)[:120]
                 )
                 chat_response = await self._execute_fallback_turn(
                     db=db,
@@ -473,6 +490,7 @@ class AutonomousAgentService:
         """Ejecuta el turno del agente en streaming SSE estructurado (tool_end, tokens y metadata), persistiendo en BD."""
         turn_started = time.perf_counter()
         active_session_id = session_id or uuid.uuid4()
+        options = _with_language(options, user_message)
 
         # Iniciar traza raíz de telemetría (Langfuse)
         trace = telemetry_service.start_trace(
@@ -538,7 +556,7 @@ class AutonomousAgentService:
                 tool_defs = _get_tool_declarations()
                 gemini_tools = [types.Tool(function_declarations=tool_defs)]
                 config = types.GenerateContentConfig(
-                    system_instruction=SYSTEM_INSTRUCTION,
+                    system_instruction=_system_instruction(_options_language(options)),
                     tools=gemini_tools,
                     temperature=temperature,
                 )
@@ -632,7 +650,7 @@ class AutonomousAgentService:
 
                 if final_text_needed:
                     stream_config = types.GenerateContentConfig(
-                        system_instruction=SYSTEM_INSTRUCTION,
+                        system_instruction=_system_instruction(_options_language(options)),
                         temperature=temperature,
                     )
                     async for token in self._call_gemini_stream_with_fallback(
@@ -654,9 +672,8 @@ class AutonomousAgentService:
 
             except Exception as e:
                 logger.error("Error crítico durante stream con Gemini: %s", e, exc_info=True)
-                error_prefix = (
-                    f"⚠️ [Aviso del sistema: La API de Gemini no respondió ({type(e).__name__}: {str(e)[:120]}...). "
-                    "Se ejecutó el procesamiento documental con el motor de contingencia.]\n\n"
+                error_prefix = fallback_texts(options.language)["gemini_notice_stream"].format(
+                    error_type=type(e).__name__, error=str(e)[:120]
                 )
                 fb_response = await self._execute_fallback_turn(
                     db=db,
@@ -670,7 +687,7 @@ class AutonomousAgentService:
                 # Lo ya emitido no se reescribe: el contenido persistido es exactamente lo transmitido
                 fallback_text = fb_response.response
                 if full_response:
-                    fallback_text = f"{STREAM_FALLBACK_SEPARATOR}{fallback_text}"
+                    fallback_text = f"{fallback_texts(options.language)['stream_separator']}{fallback_text}"
                     full_response += fallback_text
                 else:
                     full_response = fallback_text
@@ -757,7 +774,7 @@ class AutonomousAgentService:
         gemini_tools = [types.Tool(function_declarations=tool_defs)]
 
         config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
+            system_instruction=_system_instruction(_options_language(options)),
             tools=gemini_tools,
             temperature=temperature,
         )
@@ -925,7 +942,11 @@ class AutonomousAgentService:
                 summary = tool_args.get("summary", "Sin resumen.")
                 key_points = tool_args.get("key_points", [])
                 result = await asyncio.to_thread(
-                    execute_generate_report_pdf, title=title, summary=summary, key_points=key_points
+                    execute_generate_report_pdf,
+                    title=title,
+                    summary=summary,
+                    key_points=key_points,
+                    language=_options_language(options),
                 )
                 return result, []
 
@@ -956,6 +977,8 @@ class AutonomousAgentService:
         options: AgentOptions | None = None,
     ) -> AgentChatResponse:
         """Modo determinístico de respaldo para desarrollo local y pruebas unitarias sin API key activa."""
+        lang = _options_language(options)
+        texts = fallback_texts(lang)
         msg_lower = user_message.lower()
         executed_tools: list[ToolExecutionRecord] = []
         collected_citations: list[CitationItem] = []
@@ -969,14 +992,15 @@ class AutonomousAgentService:
                 search_query = f"{last_user_msgs[-1]} {user_message}"
 
         # 1. Determinar si requiere búsqueda RAG
-        needs_search = any(
-            k in msg_lower
-            for k in [
-                "quién", "quien", "cv", "factura", "experiencia", "habilidad", "skills",
-                "proyecto", "documento", "auditoría", "auditoria", "cuánto", "cuanto",
-                "informe", "resumen", "investai", "mattia", "más", "mas", "detalle"
-            ]
-        )
+        search_keywords = [
+            "quién", "quien", "cv", "factura", "experiencia", "habilidad", "skills",
+            "proyecto", "documento", "auditoría", "auditoria", "cuánto", "cuanto",
+            "informe", "resumen", "investai", "mattia", "más", "mas", "detalle"
+        ]
+        if lang == "en":
+            search_keywords += ["who", "invoice", "experience", "skill", "project", "document", "audit",
+                                "how much", "report", "summary", "more", "detail"]
+        needs_search = any(k in msg_lower for k in search_keywords)
 
         rag_context = ""
         if needs_search:
@@ -1010,7 +1034,7 @@ class AutonomousAgentService:
                     tool_span.update(output={"total_found": search_res.get("total_found", 0)})
 
             if search_error:
-                response_paragraphs.append(f"⚠️ No se pudo consultar la base de conocimientos: {search_error}\n")
+                response_paragraphs.append(texts["search_failed"].format(error=search_error))
 
             rag_context = search_res.get("context_text", "")
             raw_citations = search_res.get("citations", [])
@@ -1039,31 +1063,26 @@ class AutonomousAgentService:
             )
 
         # 2. Determinar si requiere generación de PDF
-        needs_pdf = any(k in msg_lower for k in ["pdf", "reporte", "informe", "generar pdf", "descargar"])
+        needs_pdf = any(k in msg_lower for k in ["pdf", "reporte", "informe", "generar pdf", "descargar", "report"])
         pdf_info = None
         if needs_pdf:
-            pdf_title = "Informe Ejecutivo de Conocimiento"
-            if "auditoria" in msg_lower or "auditoría" in msg_lower:
-                pdf_title = "Informe de Auditoría de Sistemas y Estado Financiero"
+            pdf_title = texts["pdf_title_default"]
+            if "auditoria" in msg_lower or "auditoría" in msg_lower or (lang == "en" and "audit" in msg_lower):
+                pdf_title = texts["pdf_title_audit"]
             elif "mattia" in msg_lower:
-                pdf_title = "Perfil Profesional y Habilidades de Mattia Risso"
+                pdf_title = texts["pdf_title_profile"]
 
             clean_context = rag_context.replace("\n", " ").strip() if rag_context else ""
             if clean_context and "No se encontraron" not in clean_context:
-                pdf_summary = (
-                    f"Síntesis ejecutiva de la información documental analizada: {clean_context[:450]}"
-                )
+                pdf_summary = texts["pdf_summary_ctx"].format(context=clean_context[:450])
                 key_points = [
-                    f"Información verificada: {clean_context[:100]}...",
-                    "Datos contrastados contra las fuentes documentales indexadas en pgvector.",
-                    "Análisis estructurado y preparado para toma de decisiones ejecutivas.",
+                    texts["pdf_point_verified"].format(context=clean_context[:100]),
+                    texts["pdf_point_contrasted"],
+                    texts["pdf_point_analysis"],
                 ]
             else:
-                pdf_summary = f"Informe correspondiente a la consulta: '{user_message}'."
-                key_points = [
-                    "Búsqueda ejecutada en la base de conocimientos documental.",
-                    "Validación de registros completada satisfactoriamente.",
-                ]
+                pdf_summary = texts["pdf_summary_query"].format(message=user_message)
+                key_points = [texts["pdf_point_search"], texts["pdf_point_validation"]]
 
             with telemetry_service.span(
                 parent=trace,
@@ -1076,6 +1095,7 @@ class AutonomousAgentService:
                     title=pdf_title,
                     summary=pdf_summary,
                     key_points=key_points,
+                    language=lang,
                 )
                 if hasattr(tool_span, "update"):
                     tool_span.update(output=pdf_info)
@@ -1089,7 +1109,7 @@ class AutonomousAgentService:
             )
 
         # 3. Determinar si requiere webhook
-        needs_webhook = any(k in msg_lower for k in ["webhook", "alerta", "notificar", "notificación", "slack"])
+        needs_webhook = any(k in msg_lower for k in ["webhook", "alerta", "notificar", "notificación", "slack", "alert"])
         webhook_info = None
         if needs_webhook:
             event_type = "user_alert"
@@ -1115,25 +1135,24 @@ class AutonomousAgentService:
         # 4. Construcción de respuesta
         if rag_context and "No se encontraron" not in rag_context:
             first_cit = collected_citations[0] if collected_citations else None
-            source_tag = f" [Fuente: {first_cit.document_name}, Pág {first_cit.page_number or 1}]" if first_cit else ""
+            source_tag = (
+                texts["source_tag"].format(document=first_cit.document_name, page=first_cit.page_number or 1)
+                if first_cit
+                else ""
+            )
             response_paragraphs.append(
-                f"De acuerdo con la información recuperada de los documentos{source_tag}:\n\n"
-                f"{rag_context[:600]}..."
+                texts["retrieved"].format(source_tag=source_tag, context=rag_context[:600])
             )
         else:
-            response_paragraphs.append(
-                f"He procesado tu solicitud: '{user_message}'."
-            )
+            response_paragraphs.append(texts["processed"].format(message=user_message))
 
         if pdf_info:
             response_paragraphs.append(
-                f"\n📄 Se ha generado el informe ejecutivo en PDF: [{pdf_info['filename']}]({pdf_info['download_url']})."
+                texts["pdf_done"].format(filename=pdf_info["filename"], url=pdf_info["download_url"])
             )
 
         if webhook_info:
-            response_paragraphs.append(
-                f"\n🔔 Se ha despachado la notificación vía webhook: {webhook_info['message']}."
-            )
+            response_paragraphs.append(texts["webhook_done"].format(message=webhook_info["message"]))
 
         final_text = "\n".join(response_paragraphs)
         if api_error_notice:

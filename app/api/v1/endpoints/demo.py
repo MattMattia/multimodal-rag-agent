@@ -1,7 +1,8 @@
 import logging
 import time
+from typing import Literal
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -56,6 +57,7 @@ async def demo_status(db: AsyncSession = Depends(get_db)):
 )
 async def evaluate_retrieval(
     request: EvaluateRequest | None = Body(default=None),
+    lang: Literal["es", "en"] = Query("es", description="Idioma de las advertencias del informe"),
     db: AsyncSession = Depends(get_db),
 ):
     """Ejecuta las 8 consultas doradas en cada modalidad y devuelve métricas agregadas y por consulta."""
@@ -66,7 +68,7 @@ async def evaluate_retrieval(
         )
     top_k = request.top_k if request else EvaluateRequest().top_k
     try:
-        return await RAGEvaluationService().evaluate(db, top_k=top_k)
+        return await RAGEvaluationService().evaluate(db, top_k=top_k, lang=lang)
     except Exception as e:
         logger.exception("Error durante la evaluación RAG: %s", e)
         raise HTTPException(

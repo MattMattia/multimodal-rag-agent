@@ -13,6 +13,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from app.core.i18n import labels as i18n_labels
+
 logger = logging.getLogger(__name__)
 
 REPORTS_DIR = Path("uploads/reports")
@@ -24,6 +26,7 @@ def execute_generate_report_pdf(
     summary: str,
     key_points: list[str] | None = None,
     sections: list[dict[str, str]] | None = None,
+    language: str = "es",
 ) -> dict[str, Any]:
     """Genera un informe ejecutivo profesional en formato PDF utilizando ReportLab.
 
@@ -32,16 +35,18 @@ def execute_generate_report_pdf(
         summary: Párrafo de resumen ejecutivo.
         key_points: Lista opcional de viñetas con puntos o conclusiones clave.
         sections: Lista opcional de secciones adicionales (cada una con 'heading' y 'content').
+        language: Idioma de las etiquetas del documento ('es' por defecto, o 'en').
 
     Returns:
         Diccionario con filename, file_path, download_url y status.
     """
     logger.info("Generando reporte ejecutivo en PDF: '%s'", title)
+    lbl = i18n_labels(language)
 
     # Sanitizar título para nombre de archivo
     safe_title = re.sub(r"[^\w\-_\. ]", "_", title).strip().replace(" ", "_")[:40]
     unique_id = str(uuid.uuid4())[:8]
-    filename = f"reporte_{unique_id}_{safe_title}.pdf"
+    filename = f"{lbl['report_prefix']}_{unique_id}_{safe_title}.pdf"
     file_path = REPORTS_DIR / filename
 
     # Configuración del documento ReportLab
@@ -109,17 +114,19 @@ def execute_generate_report_pdf(
     # 1. Cabecera y Título
     elements.append(Paragraph(escape(title), title_style))
     current_time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    elements.append(Paragraph(f"Generado automáticamente por Agente IA Autónomo | Fecha: {current_time_str}", date_style))
+    elements.append(
+        Paragraph(escape(f"{lbl['generated_on']} {current_time_str} | {lbl['report_brand']}"), date_style)
+    )
     elements.append(Spacer(1, 10))
 
     # 2. Resumen Ejecutivo
-    elements.append(Paragraph("Resumen Ejecutivo", heading_style))
+    elements.append(Paragraph(escape(lbl['executive_summary']), heading_style))
     elements.append(Paragraph(escape(summary).replace("\n", "<br/>"), body_style))
     elements.append(Spacer(1, 10))
 
     # 3. Puntos Clave
     if key_points:
-        elements.append(Paragraph("Conclusiones y Puntos Clave", heading_style))
+        elements.append(Paragraph(escape(lbl['key_takeaways']), heading_style))
         for point in key_points:
             elements.append(Paragraph(f"• {escape(point)}", bullet_style))
         elements.append(Spacer(1, 10))
@@ -127,7 +134,7 @@ def execute_generate_report_pdf(
     # 4. Secciones Adicionales
     if sections:
         for sec in sections:
-            sec_heading = sec.get("heading", "Sección")
+            sec_heading = sec.get("heading", lbl["section"])
             sec_content = sec.get("content", "")
             elements.append(Paragraph(escape(sec_heading), heading_style))
             elements.append(Paragraph(escape(sec_content).replace("\n", "<br/>"), body_style))
@@ -135,7 +142,7 @@ def execute_generate_report_pdf(
 
     # 5. Pie de página decorativo
     elements.append(Spacer(1, 20))
-    footer_data = [["Sistema RAG Multimodal & Agente IA Autónomo - Documento Confidencial"]]
+    footer_data = [[lbl["report_footer"]]]
     footer_table = Table(footer_data, colWidths=[530])
     footer_table.setStyle(
         TableStyle(
@@ -160,16 +167,19 @@ def execute_generate_report_pdf(
         "filename": filename,
         "file_path": str(file_path),
         "download_url": f"/uploads/reports/{filename}",
-        "message": f"Reporte PDF '{title}' generado exitosamente.",
+        "message": lbl["report_generated_msg"].format(title=title),
     }
 
 
 
-def build_conversation_pdf(session_id: uuid.UUID, messages: list[dict[str, Any]]) -> bytes:
+def build_conversation_pdf(
+    session_id: uuid.UUID, messages: list[dict[str, Any]], language: str = "es"
+) -> bytes:
     """Maqueta una conversación completa (mensajes, citas y herramientas) como PDF ejecutivo en memoria.
 
     Síncrona (CPU): ejecutar con asyncio.to_thread. Todo el texto se escapa para ReportLab.
     """
+    lbl = i18n_labels(language)
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40
@@ -196,22 +206,28 @@ def build_conversation_pdf(session_id: uuid.UUID, messages: list[dict[str, Any]]
     )
 
     elements: list[Any] = [
-        Paragraph("Conversación con el Agente IA", title_style),
+        Paragraph(escape(lbl['session_export']), title_style),
         Paragraph(
-            escape(f"Sesión {session_id} | Exportado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"),
+            escape(
+                f"{lbl['session']} {session_id} | {lbl['generated_on']} "
+                f"{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+            ),
             meta_style,
         ),
     ]
     for msg in messages:
-        role_label = {"user": "Usuario", "assistant": "Agente"}.get(msg["role"], str(msg["role"]))
+        role_label = {"user": lbl["user"], "assistant": lbl["agent"]}.get(msg["role"], str(msg["role"]))
         elements.append(Paragraph(escape(role_label), role_style))
         elements.append(Paragraph(escape(msg["content"]).replace("\n", "<br/>"), body_style))
-        for cit in msg.get("citations") or []:
-            page = f", Pág {cit['page_number']}" if cit.get("page_number") else ""
-            elements.append(Paragraph(escape(f"Fuente: {cit.get('document_name', '?')}{page}"), small_style))
+        citations = msg.get("citations") or []
+        if citations:
+            elements.append(Paragraph(escape(f"{lbl['cited_sources']}:"), small_style))
+        for cit in citations:
+            page = f", {lbl['page']} {cit['page_number']}" if cit.get("page_number") else ""
+            elements.append(Paragraph(escape(f"{cit.get('document_name', '?')}{page}"), small_style))
         for tool in msg.get("executed_tools") or []:
             args = json.dumps(tool.get("tool_input", {}), ensure_ascii=False, default=str)[:200]
-            elements.append(Paragraph(escape(f"Herramienta: {tool.get('tool_name', '?')} {args}"), small_style))
+            elements.append(Paragraph(escape(f"{lbl['tool']}: {tool.get('tool_name', '?')} {args}"), small_style))
 
     doc.build(elements)
     return buffer.getvalue()
