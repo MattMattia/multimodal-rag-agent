@@ -3,11 +3,15 @@ import {
   GOLDEN_DOCUMENTS,
   GOLDEN_EVAL_QUERIES,
   allChunks,
+  SHOWCASE_EVALUATION_WARNING,
   bm25Scores,
   buildPdf,
+  buildReportPdf,
   decodeReportFilename,
+  decodeReportLocale,
   encodeSse,
   evaluateCorpus,
+  exportTranscript,
   hitRateAtK,
   isRelevant,
   mean,
@@ -254,5 +258,63 @@ describe("PDF reports", () => {
     expect(name).toMatch(/^showcase-report-[A-Za-z0-9_-]+\.pdf$/);
     expect(decodeReportFilename(name)).toBe("¿Ingresos de LATAM?");
     expect(decodeReportFilename("reporte_123.pdf")).toBeNull();
+  });
+});
+
+describe("showcase locale (es/en)", () => {
+  const answerOf = async (message: string, language?: "es" | "en" | "auto"): Promise<string> => {
+    let text = "";
+    for await (const event of streamAgentTurn({ message, ...(language ? { language } : {}) })) {
+      if (event.type === "token") text += event.content;
+    }
+    return text;
+  };
+
+  it("answers in Spanish or English as requested, defaulting to English", async () => {
+    expect(await answerOf("HNSW m ef_construction", "es")).toContain("Esto es lo que dice el Golden Corpus");
+    expect(await answerOf("HNSW m ef_construction", "en")).toContain("Here is what the Golden Corpus says");
+    expect(await answerOf("HNSW m ef_construction")).toContain("Here is what the Golden Corpus says");
+  });
+
+  it("detects the language of the question when language is auto", async () => {
+    expect(await answerOf("¿Qué parámetros usa el índice HNSW?", "auto")).toContain("Esto es lo que dice el Golden Corpus");
+    expect(await answerOf("Which parameters does the HNSW index use?", "auto")).toContain("Here is what the Golden Corpus says");
+  });
+
+  it("names the report tool input and download link in the requested language", async () => {
+    const events: AgentStreamEvent[] = [];
+    for await (const e of streamAgentTurn({ message: "Genera un informe PDF sobre costes de inferencia", language: "es" })) events.push(e);
+    const reportStart = events.find((e) => e.type === "tool_start" && e.tool_name === "generate_report_pdf");
+    expect(reportStart).toMatchObject({ tool_input: { title: "Informe Ejecutivo de Conocimiento" } });
+    const text = events.flatMap((e) => (e.type === "token" ? [e.content] : [])).join("");
+    expect(text).toContain("[Descargar informe](/api/reports/");
+    const name = /\/api\/reports\/([A-Za-z0-9._-]+\.pdf)/.exec(text)![1]!;
+    expect(decodeReportFilename(name)).toBe("Genera un informe PDF sobre costes de inferencia");
+    expect(decodeReportLocale(name)).toBe("es");
+  });
+
+  it("writes evaluation warnings in the requested language", () => {
+    expect(evaluateCorpus(5, "es").warnings?.[0]).toMatch(/no son semánticas/);
+    expect(evaluateCorpus(5, "en").warnings?.[0]).toBe(SHOWCASE_EVALUATION_WARNING);
+  });
+
+  it("builds the report PDF in es and en, keeping legacy filenames English", () => {
+    expect(pdfText(buildReportPdf("ingresos por región", "es"))).toContain("Informe Ejecutivo de Conocimiento");
+    expect(pdfText(buildReportPdf("revenue by region", "en"))).toContain("Executive Knowledge Report");
+    expect(reportFilenameFor("q", "es")).toMatch(/^showcase-report-[A-Za-z0-9_-]+\.es\.pdf$/);
+    expect(decodeReportLocale(reportFilenameFor("q"))).toBe("en");
+  });
+
+  it("exports the transcript with localized labels", () => {
+    const messages = [
+      { role: "user" as const, content: "hola", created_at: "2026-01-01T00:00:00Z" },
+      { role: "assistant" as const, content: "respuesta", created_at: "2026-01-01T00:00:01Z", citations: [{ document_name: "a.pdf", page_number: 1, chunk_type: "text" }] },
+    ];
+    const md = String(exportTranscript("s1", messages, "markdown", "es").body);
+    expect(md).toContain("## Usuario");
+    expect(md).toContain("## Agente");
+    expect(md).toContain("**Fuentes:**");
+    expect(String(exportTranscript("s1", messages, "markdown", "en").body)).toContain("## User");
+    expect(pdfText(exportTranscript("s1", messages, "pdf", "es").body as Uint8Array)).toContain("Usuario - ");
   });
 });

@@ -2,15 +2,14 @@
 import type { EvaluationModeName, EvaluationResponse, ModeEvaluation, QueryEvaluation } from "../contracts";
 import { type GoldenEvalQuery, GOLDEN_EVAL_QUERIES, allChunks, chunkById } from "./corpus";
 import { ShowcaseError } from "./errors";
+import { SHOWCASE_DEFAULT_LOCALE, SHOWCASE_TEXT, type ShowcaseLocale } from "./i18n";
 import { hitRateAtK, isRelevant, mean, ndcgAtK, reciprocalRank } from "./metrics";
 import { searchCorpus } from "./search";
 
 export const EVALUATION_MODES: readonly EvaluationModeName[] = ["dense", "sparse", "hybrid"];
 
-export const SHOWCASE_EVALUATION_WARNING =
-  "Showcase engine: dense and hybrid scores come from a deterministic lexical feature-hashing stand-in, " +
-  "not semantic embeddings, and the reranker is a lexical stand-in; only sparse (BM25) is meaningful here. " +
-  "Run the benchmark against the live FastAPI backend with GOOGLE_API_KEY for semantic results.";
+/** English disclosure (the default); `evaluateCorpus(k, "es")` returns the Spanish one. */
+export const SHOWCASE_EVALUATION_WARNING = SHOWCASE_TEXT.en.evaluationWarning;
 
 /** Blocks (parent or standalone chunk) of the expected documents that satisfy the relevance rule. */
 function countRelevantBlocks(spec: GoldenEvalQuery): number {
@@ -46,7 +45,7 @@ function runQuery(spec: GoldenEvalQuery, mode: EvaluationModeName, topK: number,
   };
 }
 
-export function evaluateCorpus(topK: number = 5): EvaluationResponse {
+export function evaluateCorpus(topK: number = 5, locale: ShowcaseLocale = SHOWCASE_DEFAULT_LOCALE): EvaluationResponse {
   if (!Number.isInteger(topK) || topK < 1 || topK > 20) {
     throw new ShowcaseError(422, "top_k must be an integer between 1 and 20.");
   }
@@ -67,7 +66,7 @@ export function evaluateCorpus(topK: number = 5): EvaluationResponse {
     top_k: topK,
     num_queries: GOLDEN_EVAL_QUERIES.length,
     embedding_mode: "mock",
-    warnings: [SHOWCASE_EVALUATION_WARNING],
+    warnings: [SHOWCASE_TEXT[locale].evaluationWarning],
     modes,
   };
 }

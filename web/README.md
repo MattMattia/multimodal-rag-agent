@@ -14,6 +14,14 @@ Four views: **Agent Studio**, **Knowledge Base**, **Benchmark Lab** and **Archit
 - In the showcase, the "dense" retriever is a **lexical feature-hashing stand-in, not a semantic model**.
   Its reranker and answers are extractive too, with no LLM. The benchmark reports this with `embedding_mode: "mock"` and a warning.
 
+## Languages (es / en)
+
+- The UI is bilingual. The **🇪🇸 ES / 🇺🇸 EN** button next to the status badge and the theme toggle switches every view instantly.
+- Default: Spanish, unless `navigator.language` starts with `en`. The choice is stored in `localStorage` under `rag_locale` and kept in `<html lang>`.
+- Strings live in `src/lib/i18n/en.ts` and `es.ts`; `es.ts` is typed with the `Dictionary` shape of `en.ts`, and a test checks key parity.
+- The active language travels with each request: chat body `language` (`es` | `en` | `auto`), `?lang=es|en` on session export and `/api/demo/evaluate`.
+  The showcase engine answers, builds PDFs and writes benchmark warnings in that language; Spanish report links end in `.es.pdf`.
+
 ## Run
 
 ```bash
@@ -53,4 +61,4 @@ Known contract gaps in the backend:
 - `CitationItem` has no RRF score or content, so the UI re-runs `/api/search` once per turn to fill the citation cards.
 - Report `download_url` uses `/uploads/reports/...`. The UI rewrites it to `/api/reports/...`.
 
-The ADR viewer renders `src/content/adr/*.md`. Keep these files in sync with `docs/adr/`.
+The ADR viewer renders `src/content/adr/*.md` (English) and `*.es.md` (Spanish, same base name; a missing translation falls back to English). Keep these files in sync with `docs/adr/`.

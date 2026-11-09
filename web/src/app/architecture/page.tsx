@@ -1,25 +1,37 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import type { Metadata } from "next";
-import { AdrViewer, type AdrDocument } from "@/components/architecture/AdrViewer";
+import { AdrViewer, type AdrDocument, type AdrVersion } from "@/components/architecture/AdrViewer";
+import { ArchitectureHeader } from "@/components/architecture/ArchitectureHeader";
 import { ServiceStatus } from "@/components/architecture/ServiceStatus";
 import { TriModalMap } from "@/components/architecture/TriModalMap";
 
-export const metadata: Metadata = { title: "Architecture & ADRs" };
+export const metadata: Metadata = { title: "Arquitectura y ADRs · Architecture & ADRs" };
 export const dynamic = "force-static";
 
+const SPANISH_SUFFIX = ".es.md";
+
+async function readVersion(file: string, fallbackTitle: string): Promise<AdrVersion> {
+  const content = await readFile(file, "utf8");
+  return { title: /^#\s+(.+)$/m.exec(content)?.[1] ?? fallbackTitle, content };
+}
+
 /**
- * ADRs are read at build time from `src/content/adr/*.md`. They mirror `docs/adr/` (written in Phase 5);
- * keep both folders in sync.
+ * ADRs are read at build time from `src/content/adr/`: `X.md` (English) and its Spanish translation `X.es.md`.
+ * They mirror `docs/adr/`; keep both folders in sync. A missing `.es.md` falls back to the English text.
  */
 async function loadAdrs(): Promise<AdrDocument[]> {
   const dir = path.join(process.cwd(), "src", "content", "adr");
-  const files = (await readdir(dir)).filter((f) => f.endsWith(".md")).sort();
+  const files = await readdir(dir);
+  const available = new Set(files);
+  const bases = files.filter((f) => f.endsWith(".md") && !f.endsWith(SPANISH_SUFFIX)).sort();
   return Promise.all(
-    files.map(async (file) => {
-      const content = await readFile(path.join(dir, file), "utf8");
-      const title = /^#\s+(.+)$/m.exec(content)?.[1] ?? file;
-      return { slug: file.replace(/\.md$/, ""), title, content };
+    bases.map(async (file) => {
+      const slug = file.replace(/\.md$/, "");
+      const english = await readVersion(path.join(dir, file), file);
+      const spanishFile = `${slug}${SPANISH_SUFFIX}`;
+      const spanish = available.has(spanishFile) ? await readVersion(path.join(dir, spanishFile), file) : english;
+      return { slug, en: english, es: spanish };
     }),
   );
 }
@@ -28,10 +40,7 @@ export default async function ArchitecturePage() {
   const adrs = await loadAdrs();
   return (
     <div className="stack" style={{ gap: "var(--space-4)" }}>
-      <header className="page-header">
-        <h1>🏗️ System Architecture, Telemetry & ADRs</h1>
-        <p>Three execution modes, one contract: Vercel serverless showcase, zero-Docker SQLite and the full PostgreSQL + pgvector stack.</p>
-      </header>
+      <ArchitectureHeader />
       <div className="arch-grid">
         <TriModalMap />
         <ServiceStatus />

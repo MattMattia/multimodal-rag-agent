@@ -5,6 +5,8 @@ import { GET as getImage } from "./documents/[id]/images/[imageId]/route";
 import { POST as postSearch } from "./search/route";
 import { GET as getSessions } from "./sessions/route";
 import { POST as postDocument } from "./documents/route";
+import { POST as postEvaluate } from "./demo/evaluate/route";
+import { POST as postExport } from "./sessions/[id]/export/route";
 import { GOLDEN_DOCUMENTS, reportFilenameFor } from "@/lib/showcase-engine";
 
 const params = <T,>(value: T) => ({ params: Promise.resolve(value) });
@@ -190,5 +192,76 @@ describe("showcase artefacts", () => {
     const response = await getImage(new Request("http://web.test/x"), params({ id: doc.id, imageId: doc.image.id }));
     expect(response.headers.get("content-type")).toContain("image/svg+xml");
     expect(await response.text()).toContain("<svg");
+  });
+});
+
+describe("BFF locale propagation", () => {
+  const SESSION = "6a1c7f80-1e5b-4a0c-9d55-3b8f2d9e4c11";
+  const transcript = { messages: [{ role: "user", content: "hola", created_at: "2026-01-01T00:00:00Z" }] };
+
+  it("forwards the chat language to FastAPI", async () => {
+    fetchMock.mockResolvedValue(new Response("", { headers: { "Content-Type": "text/event-stream" } }));
+    await postChat(jsonRequest("http://web.test/api/chat/stream", { message: "hi", language: "en" }));
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(String(init?.body))).toEqual({ message: "hi", language: "en" });
+  });
+
+  it("rejects an unknown chat language with 422 before proxying", async () => {
+    const response = await postChat(jsonRequest("http://web.test/api/chat/stream", { message: "hi", language: "fr" }));
+    expect(response.status).toBe(422);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("answers the showcase chat in the requested language", async () => {
+    fetchMock.mockRejectedValue(new TypeError("fetch failed"));
+    const response = await postChat(jsonRequest("http://web.test/api/chat/stream", { message: "HNSW m=16", language: "es" }));
+    const frames = (await response.text()).split("\n\n").filter(Boolean).map((f) => JSON.parse(f.replace(/^data: /, "")));
+    const answer = frames.flatMap((e: { type: string; content?: string }) => (e.type === "token" ? [e.content] : [])).join("");
+    expect(answer).toContain("Esto es lo que dice el Golden Corpus");
+  });
+
+  it("forwards lang on export and renders the showcase export in that language", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("# ok", { status: 200, headers: { "Content-Type": "text/markdown" } }));
+    await postExport(jsonRequest(`http://web.test/api/sessions/${SESSION}/export?format=markdown&lang=en`, transcript), params({ id: SESSION }));
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(`http://backend.test:8000/api/v1/agent/sessions/${SESSION}/export?format=markdown&lang=en`);
+
+    fetchMock.mockRejectedValue(new TypeError("fetch failed"));
+    const offline = await postExport(
+      jsonRequest(`http://web.test/api/sessions/${SESSION}/export?format=markdown&lang=es`, transcript),
+      params({ id: SESSION }),
+    );
+    expect(await offline.text()).toContain("## Usuario");
+  });
+
+  it("rejects an unknown export lang with 422", async () => {
+    const response = await postExport(jsonRequest(`http://web.test/api/sessions/${SESSION}/export?lang=de`, transcript), params({ id: SESSION }));
+    expect(response.status).toBe(422);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards lang on evaluate and localizes the showcase warnings", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    await postEvaluate(jsonRequest("http://web.test/api/demo/evaluate?lang=en", { top_k: 3 }));
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("http://backend.test:8000/api/v1/demo/evaluate?lang=en");
+    expect(JSON.parse(String(init?.body))).toEqual({ top_k: 3 });
+
+    fetchMock.mockRejectedValue(new TypeError("fetch failed"));
+    const offline = await postEvaluate(jsonRequest("http://web.test/api/demo/evaluate?lang=es", { top_k: 3 }));
+    const body = await offline.json();
+    expect(body.warnings[0]).toMatch(/no son semánticas/);
+  });
+
+  it("rejects an unknown evaluate lang with 422", async () => {
+    const response = await postEvaluate(jsonRequest("http://web.test/api/demo/evaluate?lang=xx", {}));
+    expect(response.status).toBe(422);
+  });
+
+  it("serves a Spanish showcase report PDF for a .es report filename", async () => {
+    fetchMock.mockRejectedValue(new TypeError("fetch failed"));
+    const filename = reportFilenameFor("ingresos por región", "es");
+    const response = await getReport(new Request(`http://web.test/api/reports/${filename}`), params({ filename }));
+    const text = String.fromCharCode(...new Uint8Array(await response.arrayBuffer()));
+    expect(text).toContain("Informe Ejecutivo de Conocimiento");
   });
 });

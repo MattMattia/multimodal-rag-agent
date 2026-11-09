@@ -12,6 +12,7 @@ import type {
   ExportFormat,
   ExportTranscriptMessage,
   FeedbackResponse,
+  ResponseLanguage,
   SearchRequest,
   SearchResponse,
   SessionSummary,
@@ -56,7 +57,9 @@ const post = (body?: unknown, signal?: AbortSignal): RequestInit => ({
 export const api = {
   status: (signal?: AbortSignal) => json<BffDemoStatus>("/api/demo/status", { signal }),
   seed: () => json<DemoSeedResponse>("/api/demo/seed", post()),
-  evaluate: (topK: number, signal?: AbortSignal) => json<EvaluationResponse>("/api/demo/evaluate", post({ top_k: topK }, signal)),
+  /** `lang` localizes the benchmark warnings (live backend and showcase engine). */
+  evaluate: (topK: number, lang: ResponseLanguage, signal?: AbortSignal) =>
+    json<EvaluationResponse>(`/api/demo/evaluate?lang=${lang}`, post({ top_k: topK }, signal)),
   search: (request: SearchRequest, signal?: AbortSignal) => json<SearchResponse>("/api/search", post(request, signal)),
   documents: (signal?: AbortSignal) => json<DocumentResponse[]>("/api/documents", { signal }),
   document: (id: string, signal?: AbortSignal) => json<DocumentDetailResponse>(`/api/documents/${id}`, { signal }),
@@ -77,8 +80,9 @@ export const api = {
     id: string,
     format: ExportFormat,
     messages: readonly ExportTranscriptMessage[],
+    lang: ResponseLanguage,
   ): Promise<{ blob: Blob; filename: string }> => {
-    const response = await fetch(`/api/sessions/${id}/export?format=${format}`, post({ messages }));
+    const response = await fetch(`/api/sessions/${id}/export?format=${format}&lang=${lang}`, post({ messages }));
     if (!response.ok) throw await errorFrom(response);
     const disposition = response.headers.get("content-disposition") ?? "";
     const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? `session-${id}.${format === "pdf" ? "pdf" : "md"}`;

@@ -10,10 +10,14 @@ import type {
 } from "@/lib/contracts";
 import { api } from "@/lib/client/api";
 import { readAgentStream } from "@/lib/client/sse";
+import { en } from "@/lib/i18n/en";
+import { es } from "@/lib/i18n/es";
+import type { Locale } from "@/lib/i18n/types";
 import type { ChatSession, Hyperparameters, ToolStep, Turn } from "./types";
 
 const newId = (): string => crypto.randomUUID();
 const EMPTY_SESSION: ChatSession = { id: null, title: "New session", turns: [] };
+const STREAM_FAILED: Record<Locale, string> = { es: es.agent.errors.stream, en: en.agent.errors.stream };
 
 /** Pure reducer step: applies one SSE event to a turn and returns the new turn. */
 export function applyEvent(turn: Turn, event: AgentStreamEvent): Turn {
@@ -98,7 +102,8 @@ function turnsFromHistory(messages: readonly ChatMessageResponse[], params: Turn
   return turns;
 }
 
-export function useAgentChat() {
+/** Agent conversation state; every turn asks the agent to answer in `language` (the active UI locale). */
+export function useAgentChat(language: Locale) {
   const [session, setSession] = useState<ChatSession>(EMPTY_SESSION);
   const [localSessions, setLocalSessions] = useState<Record<string, ChatSession>>({});
   const controller = useRef<AbortController | null>(null);
@@ -157,7 +162,7 @@ export function useAgentChat() {
       let sessionId: string | null = session.id;
       try {
         const { response, source } = await api.chatStream(
-          { message: text, session_id: session.id, filter_document_id: filterDocumentId, ...params },
+          { message: text, session_id: session.id, filter_document_id: filterDocumentId, ...params, language },
           controller.current.signal,
         );
         current = { ...current, source };
@@ -190,13 +195,13 @@ export function useAgentChat() {
         updateTurn(turn.id, (t) => ({
           ...t,
           status: aborted ? "done" : "error",
-          error: aborted ? undefined : error instanceof Error ? error.message : "The agent stream failed.",
+          error: aborted ? undefined : error instanceof Error ? error.message : STREAM_FAILED[language],
         }));
       } finally {
         controller.current = null;
       }
     },
-    [busy, hydrateEvidence, session.id, updateTurn],
+    [busy, hydrateEvidence, language, session.id, updateTurn],
   );
 
   const stop = useCallback(() => controller.current?.abort(), []);

@@ -24,8 +24,12 @@ export type SearchResponse = Schemas["SearchResponse"];
 
 export type AgentChatRequest = WithDefaults<
   Schemas["AgentChatRequest"],
-  "search_mode" | "top_k" | "enable_rerank"
+  "search_mode" | "top_k" | "enable_rerank" | "language"
 >;
+/** Answer language of an agent turn: an explicit locale or "auto" (detect from the question; backend default). */
+export type ChatLanguage = NonNullable<AgentChatRequest["language"]>;
+/** `lang` query of the export and evaluate endpoints (backend default "es"). */
+export type ResponseLanguage = Exclude<ChatLanguage, "auto">;
 export type AgentChatResponse = Schemas["AgentChatResponse"];
 export type CitationItem = Schemas["CitationItem"];
 export type ToolExecutionRecord = Schemas["ToolExecutionRecord"];

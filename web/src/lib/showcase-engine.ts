@@ -14,7 +14,9 @@ export { hitRateAtK, isRelevant, mean, ndcgAtK, reciprocalRank } from "./showcas
 export { EVALUATION_MODES, SHOWCASE_EVALUATION_WARNING, evaluateCorpus } from "./showcase/evaluation";
 export { chunkText, composeAnswer, encodeSse, streamAgentTurn } from "./showcase/agent";
 export { buildPdf } from "./showcase/pdf";
-export { buildReportPdf, decodeReportFilename, exportTranscript, reportFilenameFor } from "./showcase/reports";
+export { buildReportPdf, decodeReportFilename, decodeReportLocale, exportTranscript, reportFilenameFor } from "./showcase/reports";
+export { detectLocale, resolveLocale } from "./showcase/i18n";
+export type { ChatLanguage, ShowcaseLocale } from "./showcase/i18n";
 export { documentDetail, findImage, listDocuments, showcaseSeed, showcaseStatus } from "./showcase/catalog";
 export { renderDiagramSvg } from "./showcase/diagrams";
 export { ShowcaseError } from "./showcase/errors";

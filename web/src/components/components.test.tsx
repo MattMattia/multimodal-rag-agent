@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen, within } from "@testing-library/react";
+import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import type { BffDemoStatus, SearchDiagnostics } from "@/lib/contracts";
 import { SseParser } from "@/lib/client/sse";
@@ -7,8 +8,17 @@ import { CitationCard } from "./agent/CitationCard";
 import { LatencyXRay } from "./agent/LatencyXRay";
 import { applyEvent } from "./agent/useAgentChat";
 import { DEFAULT_HYPERPARAMETERS, type Turn } from "./agent/types";
-import { LIVE_LABEL, SHOWCASE_LABEL, StatusBadgeView } from "./shell/StatusBadge";
+import { en } from "@/lib/i18n/en";
+import { LocaleProvider } from "@/lib/i18n/LocaleProvider";
+import { LOCALE_STORAGE_KEY } from "@/lib/i18n/types";
+import { StatusBadgeView } from "./shell/StatusBadge";
 import { Markdown } from "./Markdown";
+
+/** These assertions predate i18n and are written in English; the app default is Spanish, so pin English. */
+function renderEn(ui: ReactElement) {
+  localStorage.setItem(LOCALE_STORAGE_KEY, "en");
+  return render(<LocaleProvider>{ui}</LocaleProvider>);
+}
 
 const diagnostics: SearchDiagnostics = {
   db_dialect: "postgresql",
@@ -37,21 +47,21 @@ const status = (source: "fastapi" | "showcase"): BffDemoStatus => ({
 
 describe("StatusBadgeView", () => {
   it("shows the live cluster label with the database dialect", () => {
-    render(<StatusBadgeView status={status("fastapi")} error={null} />);
-    expect(screen.getByText(LIVE_LABEL)).toBeInTheDocument();
+    renderEn(<StatusBadgeView status={status("fastapi")} error={null} />);
+    expect(screen.getByText(en.shell.status.live)).toBeInTheDocument();
     expect(screen.getByText("db: sqlite")).toBeInTheDocument();
   });
 
   it("shows the serverless showcase label without a dialect badge", () => {
-    render(<StatusBadgeView status={status("showcase")} error={null} />);
-    expect(screen.getByRole("status")).toHaveTextContent(SHOWCASE_LABEL);
+    renderEn(<StatusBadgeView status={status("showcase")} error={null} />);
+    expect(screen.getByRole("status")).toHaveTextContent(en.shell.status.showcase);
     expect(screen.queryByText(/^db:/)).not.toBeInTheDocument();
   });
 });
 
 describe("LatencyXRay", () => {
   it("lists every pipeline stage in milliseconds with an accessible summary", () => {
-    render(<LatencyXRay diagnostics={diagnostics} />);
+    renderEn(<LatencyXRay diagnostics={diagnostics} />);
     const region = screen.getByRole("region", { name: "Latency X-ray" });
     expect(within(region).getByRole("img")).toHaveAccessibleName(/Semantic rerank 120 ms/);
     expect(within(region).getByText("total 175 ms")).toBeInTheDocument();
@@ -61,7 +71,7 @@ describe("LatencyXRay", () => {
 
 describe("Markdown", () => {
   it("renders tables and routes backend report links through the BFF", () => {
-    render(<Markdown source={"See [report](/uploads/reports/reporte_1_x.pdf).\n\n| Region | Revenue |\n| --- | --- |\n| EMEA | $28M |"} />);
+    renderEn(<Markdown source={"See [report](/uploads/reports/reporte_1_x.pdf).\n\n| Region | Revenue |\n| --- | --- |\n| EMEA | $28M |"} />);
     expect(screen.getByRole("link", { name: "report" })).toHaveAttribute("href", "/api/reports/reporte_1_x.pdf");
     expect(screen.getByRole("columnheader", { name: "Region" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "$28M" })).toBeInTheDocument();
@@ -74,7 +84,7 @@ describe("Markdown", () => {
   });
 
   it("does not render unsafe link targets", () => {
-    render(<Markdown source={"[click](javascript:alert(1))"} />);
+    renderEn(<Markdown source={"[click](javascript:alert(1))"} />);
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(screen.getByText(/click/)).toBeInTheDocument();
   });
@@ -83,7 +93,7 @@ describe("Markdown", () => {
 describe("CitationCard", () => {
   it("shows RRF and rerank badges and toggles the table viewer", async () => {
     const user = userEvent.setup();
-    render(
+    renderEn(
       <CitationCard
         citation={{ document_name: "Reporte_Financiero_Q3_GlobalTech.pdf", page_number: 2, chunk_type: "table", chunk_id: "c1", rerank_score: 0.91 }}
         evidence={{

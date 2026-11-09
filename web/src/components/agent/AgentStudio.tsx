@@ -3,6 +3,7 @@
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DocumentResponse, ExportFormat, ExportTranscriptMessage, SessionSummary } from "@/lib/contracts";
 import { api, downloadBlob } from "@/lib/client/api";
+import { useLocale } from "@/lib/i18n/LocaleProvider";
 import { HyperparameterPanel } from "./HyperparameterPanel";
 import { SessionsSidebar } from "./SessionsSidebar";
 import { TurnView } from "./TurnView";
@@ -10,7 +11,8 @@ import { DEFAULT_HYPERPARAMETERS, type Hyperparameters } from "./types";
 import { useAgentChat } from "./useAgentChat";
 
 export function AgentStudio() {
-  const chat = useAgentChat();
+  const { locale, t } = useLocale();
+  const chat = useAgentChat(locale);
   const [params, setParams] = useState<Hyperparameters>(DEFAULT_HYPERPARAMETERS);
   const [filterDocumentId, setFilterDocumentId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -77,10 +79,10 @@ export function AgentStudio() {
       },
     ]);
     try {
-      const { blob, filename } = await api.exportSession(chat.session.id, format, messages);
+      const { blob, filename } = await api.exportSession(chat.session.id, format, messages, locale);
       downloadBlob(blob, filename);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Export failed.");
+      setNotice(error instanceof Error ? error.message : t.agent.errors.export);
     }
   };
 
@@ -90,7 +92,7 @@ export function AgentStudio() {
       chat.forget(id);
       await loadSessions();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not delete the session.");
+      setNotice(error instanceof Error ? error.message : t.agent.errors.deleteSession);
     }
   };
 
@@ -98,7 +100,7 @@ export function AgentStudio() {
     try {
       await chat.open(id, { ...params, filter_document_id: filterDocumentId });
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not load the session.");
+      setNotice(error instanceof Error ? error.message : t.agent.errors.loadSession);
     }
   };
 
@@ -119,12 +121,12 @@ export function AgentStudio() {
         onQuickPrompt={(prompt) => void chat.send(prompt, params, filterDocumentId)}
       />
 
-      <section className="chat" aria-label="Conversation">
+      <section className="chat" aria-label={t.agent.conversation}>
         {notice && (
           <div className="alert alert-danger row" role="alert" style={{ justifyContent: "space-between" }}>
             {notice}
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => setNotice(null)}>
-              Dismiss
+              {t.agent.dismiss}
             </button>
           </div>
         )}
@@ -135,10 +137,9 @@ export function AgentStudio() {
                 <p style={{ fontSize: "2rem", margin: 0 }} aria-hidden="true">
                   🤖
                 </p>
-                <h1 style={{ fontSize: "var(--text-lg)", margin: "var(--space-2) 0" }}>Autonomous ReAct Agent Studio</h1>
+                <h1 style={{ fontSize: "var(--text-lg)", margin: "var(--space-2) 0" }}>{t.agent.emptyTitle}</h1>
                 <p style={{ margin: 0, maxWidth: "52ch" }}>
-                  Ask about the Golden Corpus — architecture, Q3 financials or Zero Trust security. Watch every tool call, the
-                  latency X-ray of each RAG stage and the multimodal evidence behind the answer.
+                  {t.agent.emptyBody}
                 </p>
               </div>
             </div>
@@ -147,14 +148,14 @@ export function AgentStudio() {
           )}
           <div ref={endRef} />
         </div>
-        <form className="composer" onSubmit={submit} aria-label="Ask the agent">
+        <form className="composer" onSubmit={submit} aria-label={t.agent.composerLabel}>
           <label htmlFor="composer-input" className="sr-only">
-            Message
+            {t.agent.messageLabel}
           </label>
           <textarea
             id="composer-input"
             className="textarea"
-            placeholder="Ask the agent… e.g. “Generate a PDF report on Q3 revenue by region”"
+            placeholder={t.agent.placeholder}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
@@ -162,14 +163,14 @@ export function AgentStudio() {
             rows={2}
           />
           <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className="kbd-hint">Enter to send · Shift+Enter for a new line</span>
+            <span className="kbd-hint">{t.agent.hint}</span>
             {chat.busy ? (
               <button type="button" className="btn" onClick={chat.stop}>
-                ⏹ Stop
+                {t.agent.stop}
               </button>
             ) : (
               <button type="submit" className="btn btn-primary" disabled={!draft.trim()}>
-                Send ➤
+                {t.agent.send}
               </button>
             )}
           </div>

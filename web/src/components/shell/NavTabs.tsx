@@ -2,21 +2,23 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useLocale } from "@/lib/i18n/LocaleProvider";
 
 export const VIEWS = [
-  { href: "/", label: "💬 Agent Studio" },
-  { href: "/knowledge", label: "📚 Knowledge Base" },
-  { href: "/benchmark", label: "📊 Benchmark Lab" },
-  { href: "/architecture", label: "🏗️ Architecture & ADRs" },
+  { href: "/", key: "agent" },
+  { href: "/knowledge", key: "knowledge" },
+  { href: "/benchmark", key: "benchmark" },
+  { href: "/architecture", key: "architecture" },
 ] as const;
 
 export function NavTabs() {
   const pathname = usePathname();
+  const { t } = useLocale();
   return (
-    <nav className="nav" aria-label="Views">
+    <nav className="nav" aria-label={t.shell.navLabel}>
       {VIEWS.map((view) => (
         <Link key={view.href} href={view.href} aria-current={pathname === view.href ? "page" : undefined}>
-          {view.label}
+          {t.shell.nav[view.key]}
         </Link>
       ))}
     </nav>

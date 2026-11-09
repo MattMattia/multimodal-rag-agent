@@ -1,11 +1,11 @@
+"use client";
+
 import type { SearchMode } from "@/lib/contracts";
+import { formatNumber } from "@/lib/i18n/format";
+import { useLocale } from "@/lib/i18n/LocaleProvider";
 import type { Hyperparameters } from "./types";
 
-const MODES: Array<{ value: SearchMode; label: string }> = [
-  { value: "hybrid", label: "Hybrid RRF" },
-  { value: "dense", label: "Dense only" },
-  { value: "sparse", label: "Sparse BM25" },
-];
+const MODES: readonly SearchMode[] = ["hybrid", "dense", "sparse"];
 
 /** Live hyperparameters sent with every agent turn (`AgentChatRequest`). */
 export function HyperparameterPanel({
@@ -17,25 +17,20 @@ export function HyperparameterPanel({
   onChange: (next: Hyperparameters) => void;
   disabled?: boolean;
 }) {
+  const { locale, t } = useLocale();
   const set = <K extends keyof Hyperparameters>(key: K, v: Hyperparameters[K]) => onChange({ ...value, [key]: v });
   return (
     <fieldset className="card stack" disabled={disabled} style={{ margin: 0 }}>
-      <legend className="sr-only">Hyperparameters</legend>
-      <h2>🎛️ Hyperparameters</h2>
+      <legend className="sr-only">{t.agent.params.legend}</legend>
+      <h2>{t.agent.params.title}</h2>
       <fieldset className="field segmented-field">
         <legend className="label">search_mode</legend>
         {/* Native radios: arrow keys, a single tab stop and screen-reader semantics come for free. */}
         <div className="segmented">
-          {MODES.map((m) => (
-            <label key={m.value} className="segment">
-              <input
-                type="radio"
-                name="search_mode"
-                value={m.value}
-                checked={value.search_mode === m.value}
-                onChange={() => set("search_mode", m.value)}
-              />
-              <span>{m.label}</span>
+          {MODES.map((mode) => (
+            <label key={mode} className="segment">
+              <input type="radio" name="search_mode" value={mode} checked={value.search_mode === mode} onChange={() => set("search_mode", mode)} />
+              <span>{t.agent.params.modes[mode]}</span>
             </label>
           ))}
         </div>
@@ -52,7 +47,7 @@ export function HyperparameterPanel({
       </label>
       <div className="field">
         <label htmlFor="hp-temp">
-          temperature: <strong>{value.temperature.toFixed(1)}</strong>
+          temperature: <strong>{formatNumber(locale, value.temperature, 1)}</strong>
         </label>
         <input
           id="hp-temp"
@@ -71,7 +66,7 @@ export function HyperparameterPanel({
         <input id="hp-turns" type="range" min={1} max={10} value={value.max_turns} onChange={(e) => set("max_turns", Number(e.target.value))} />
       </div>
       <p className="subtle" style={{ margin: 0 }}>
-        The showcase engine is deterministic: temperature has no effect there and max_turns caps the tool calls.
+        {t.agent.params.note}
       </p>
     </fieldset>
   );

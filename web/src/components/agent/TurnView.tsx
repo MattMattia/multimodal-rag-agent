@@ -1,3 +1,7 @@
+"use client";
+
+import { formatNumber } from "@/lib/i18n/format";
+import { useLocale } from "@/lib/i18n/LocaleProvider";
 import { Markdown } from "../Markdown";
 import { CitationCard } from "./CitationCard";
 import { LatencyXRay } from "./LatencyXRay";
@@ -5,6 +9,7 @@ import { ToolTimeline } from "./ToolTimeline";
 import type { Turn } from "./types";
 
 export function TurnView({ turn, onFeedback }: { turn: Turn; onFeedback: (turn: Turn, rating: 1 | -1) => void }) {
+  const { locale, t } = useLocale();
   const streaming = turn.status === "streaming";
   return (
     <div className="message">
@@ -19,13 +24,13 @@ export function TurnView({ turn, onFeedback }: { turn: Turn; onFeedback: (turn: 
         ) : (
           streaming && (
             <p className="subtle row" style={{ margin: 0 }}>
-              <span className="spinner" aria-hidden="true" /> Reasoning…
+              <span className="spinner" aria-hidden="true" /> {t.agent.turn.reasoning}
             </p>
           )
         )}
         {/* Announced once when the answer completes, instead of on every streamed token. */}
         <p className="sr-only" aria-live="polite">
-          {turn.status === "done" ? `Answer ready. ${turn.answer.slice(0, 300)}` : ""}
+          {turn.status === "done" ? `${t.agent.turn.answerReady} ${turn.answer.slice(0, 300)}` : ""}
         </p>
         {turn.status === "error" && (
           <div className="alert alert-danger" role="alert">
@@ -34,8 +39,8 @@ export function TurnView({ turn, onFeedback }: { turn: Turn; onFeedback: (turn: 
         )}
         {turn.diagnostics && <LatencyXRay diagnostics={turn.diagnostics} />}
         {turn.citations.length > 0 && (
-          <section aria-label="Citations" className="stack" style={{ gap: "var(--space-2)" }}>
-            <strong style={{ fontSize: "var(--text-sm)" }}>📚 Multimodal citations</strong>
+          <section aria-label={t.agent.turn.citationsLabel} className="stack" style={{ gap: "var(--space-2)" }}>
+            <strong style={{ fontSize: "var(--text-sm)" }}>{t.agent.turn.citationsTitle}</strong>
             <div className="citations">
               {turn.citations.map((c, i) => (
                 <CitationCard key={`${c.chunk_id ?? i}`} citation={c} evidence={c.chunk_id ? turn.evidence[c.chunk_id] : undefined} />
@@ -45,18 +50,18 @@ export function TurnView({ turn, onFeedback }: { turn: Turn; onFeedback: (turn: 
         )}
         {turn.status === "done" && (
           <div className="message-meta">
-            {turn.duration_ms !== null && <span>⏱️ {turn.duration_ms.toFixed(0)} ms</span>}
+            {turn.duration_ms !== null && <span>⏱️ {formatNumber(locale, turn.duration_ms, 0)} ms</span>}
             {turn.source && (
               <span className={`badge ${turn.source === "fastapi" ? "badge-success" : "badge-warning"}`}>
-                {turn.source === "fastapi" ? "live FastAPI" : "showcase engine"}
+                {turn.source === "fastapi" ? t.agent.turn.sourceLive : t.agent.turn.sourceShowcase}
               </span>
             )}
-            <span className="row" style={{ marginLeft: "auto" }} role="group" aria-label="Rate this answer">
+            <span className="row" style={{ marginLeft: "auto" }} role="group" aria-label={t.agent.turn.rate}>
               <button
                 type="button"
                 className="btn btn-sm icon-btn"
                 aria-pressed={turn.feedback === 1}
-                aria-label="Helpful"
+                aria-label={t.agent.turn.helpful}
                 disabled={!turn.message_id}
                 onClick={() => onFeedback(turn, 1)}
               >
@@ -66,7 +71,7 @@ export function TurnView({ turn, onFeedback }: { turn: Turn; onFeedback: (turn: 
                 type="button"
                 className="btn btn-sm icon-btn"
                 aria-pressed={turn.feedback === -1}
-                aria-label="Not helpful"
+                aria-label={t.agent.turn.notHelpful}
                 disabled={!turn.message_id}
                 onClick={() => onFeedback(turn, -1)}
               >

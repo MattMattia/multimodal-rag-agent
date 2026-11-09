@@ -1,9 +1,13 @@
-import type { EvaluationModeName } from "@/lib/contracts";
+"use client";
 
-export const MODE_META: Record<EvaluationModeName, { label: string; color: string }> = {
-  dense: { label: "Dense only", color: "var(--series-dense)" },
-  sparse: { label: "Sparse BM25 only", color: "var(--series-sparse)" },
-  hybrid: { label: "Hybrid RRF + Reranker", color: "var(--series-hybrid)" },
+import type { EvaluationModeName } from "@/lib/contracts";
+import { useLocale } from "@/lib/i18n/LocaleProvider";
+
+/** Series colour per retrieval mode; the labels come from the active dictionary (`benchmark.modeLabels`). */
+export const MODE_COLOR: Record<EvaluationModeName, string> = {
+  dense: "var(--series-dense)",
+  sparse: "var(--series-sparse)",
+  hybrid: "var(--series-hybrid)",
 };
 
 interface Props {
@@ -21,11 +25,13 @@ const PAD_TOP = 22;
 
 /** Accessible SVG bar chart comparing one metric across the three retrieval modes. */
 export function MetricChart({ title, values, max, format }: Props) {
+  const { t } = useLocale();
+  const label = (mode: EvaluationModeName) => t.benchmark.modeLabels[mode];
   const top = max ?? Math.max(...values.map((v) => v.value), 1e-9);
   const slot = WIDTH / values.length;
   const barWidth = Math.min(64, slot * 0.6);
   const plot = HEIGHT - PAD_BOTTOM - PAD_TOP;
-  const description = values.map((v) => `${MODE_META[v.mode].label}: ${format(v.value)}`).join("; ");
+  const description = values.map((v) => `${label(v.mode)}: ${format(v.value)}`).join("; ");
   return (
     <figure className="card" style={{ margin: 0 }}>
       <figcaption>
@@ -39,8 +45,8 @@ export function MetricChart({ title, values, max, format }: Props) {
           const y = HEIGHT - PAD_BOTTOM - h;
           return (
             <g key={v.mode}>
-              <rect x={x} y={y} width={barWidth} height={Math.max(h, 1)} rx={6} fill={MODE_META[v.mode].color}>
-                <title>{`${MODE_META[v.mode].label}: ${format(v.value)}`}</title>
+              <rect x={x} y={y} width={barWidth} height={Math.max(h, 1)} rx={6} fill={MODE_COLOR[v.mode]}>
+                <title>{`${label(v.mode)}: ${format(v.value)}`}</title>
               </rect>
               <text className="value" x={x + barWidth / 2} y={y - 6} textAnchor="middle">
                 {format(v.value)}

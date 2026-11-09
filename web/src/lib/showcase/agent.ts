@@ -12,6 +12,7 @@ import type {
   SearchResultItem,
   ToolExecutionRecord,
 } from "../contracts";
+import { SHOWCASE_DEFAULT_LOCALE, SHOWCASE_TEXT, type ShowcaseLocale, resolveLocale } from "./i18n";
 import { tokenize } from "./lexical";
 import { reportFilenameFor } from "./reports";
 import { assertSearchableDocument, searchCorpus } from "./search";
@@ -61,22 +62,21 @@ function citationLabel(item: SearchResultItem): string {
   return item.page_number ? `[${item.document_name}, p. ${item.page_number}]` : `[${item.document_name}]`;
 }
 
-export function composeAnswer(question: string, search: SearchResponse, reportFilename: string | null): string {
-  if (search.results.length === 0) {
-    return "I could not find evidence for that question in the Golden Corpus. Try asking about the HNSW index, RRF fusion, Q3 revenue by region or the anti-SSRF controls.";
-  }
+export function composeAnswer(
+  question: string,
+  search: SearchResponse,
+  reportFilename: string | null,
+  locale: ShowcaseLocale = SHOWCASE_DEFAULT_LOCALE,
+): string {
+  const text = SHOWCASE_TEXT[locale];
+  if (search.results.length === 0) return text.noEvidence;
   const lines = [
-    "Here is what the Golden Corpus says, with the evidence I retrieved:",
+    text.intro,
     "",
     ...search.results.slice(0, 3).map((item) => `- ${bestSentence(question, item)} ${citationLabel(item)}`),
   ];
-  if (reportFilename) {
-    lines.push("", `I generated an executive PDF report with these findings: [Download report](/api/reports/${reportFilename})`);
-  }
-  lines.push(
-    "",
-    "_Answer synthesised extractively by the serverless showcase engine (no LLM); connect the FastAPI backend for Gemini reasoning._",
-  );
+  if (reportFilename) lines.push("", text.reportLink(`/api/reports/${reportFilename}`));
+  lines.push("", text.disclaimer);
   return lines.join("\n");
 }
 
@@ -118,6 +118,8 @@ export async function* streamAgentTurn(
   const topK = request.top_k ?? DEFAULT_TOP_K;
   const maxTurns = request.max_turns ?? DEFAULT_MAX_TURNS;
   const executed: ToolExecutionRecord[] = [];
+  // English when no language is sent (legacy callers); "auto" detects the language of the question.
+  const locale = resolveLocale(request.language, request.message);
 
   const searchInput = {
     query: request.message,
@@ -142,8 +144,8 @@ export async function* streamAgentTurn(
 
   let reportFilename: string | null = null;
   if (REPORT_INTENT.test(request.message) && maxTurns > 1 && search.results.length > 0) {
-    reportFilename = reportFilenameFor(request.message);
-    const reportInput = { title: "Executive Knowledge Report", query: request.message };
+    reportFilename = reportFilenameFor(request.message, locale);
+    const reportInput = { title: SHOWCASE_TEXT[locale].reportTitle, query: request.message };
     yield { type: "tool_start", tool_name: "generate_report_pdf", tool_input: reportInput };
     started = clock();
     const reportMs = Number((clock() - started).toFixed(3));
@@ -157,7 +159,7 @@ export async function* streamAgentTurn(
     yield { type: "tool_end", tool_name: "generate_report_pdf", duration_ms: reportMs, diagnostics: null };
   }
 
-  for (const content of chunkText(composeAnswer(request.message, search, reportFilename))) {
+  for (const content of chunkText(composeAnswer(request.message, search, reportFilename, locale))) {
     yield { type: "token", content };
   }
 

@@ -1,16 +1,19 @@
 import type { Metadata, Viewport } from "next";
-import Link from "next/link";
 import type { ReactNode } from "react";
+import { LanguageToggle } from "@/components/shell/LanguageToggle";
 import { NavTabs } from "@/components/shell/NavTabs";
+import { BrandLink, SkipLink } from "@/components/shell/ShellChrome";
 import { StatusBadge } from "@/components/shell/StatusBadge";
 import { StatusProvider } from "@/components/shell/StatusProvider";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { LocaleProvider } from "@/lib/i18n/LocaleProvider";
+import { DEFAULT_LOCALE } from "@/lib/i18n/types";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "Multimodal RAG Agent Studio", template: "%s · Multimodal RAG Agent" },
   description:
-    "Hybrid RRF retrieval, an autonomous ReAct agent and a scientific RAG benchmark — live on FastAPI + pgvector or 24/7 on Vercel.",
+    "RAG multimodal con recuperación híbrida RRF, agente ReAct autónomo y benchmark científico · Hybrid RRF retrieval, an autonomous ReAct agent and a scientific RAG benchmark — live on FastAPI + pgvector or 24/7 on Vercel.",
 };
 
 export const viewport: Viewport = {
@@ -23,33 +26,28 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  // The server renders the default locale; LocaleProvider applies the stored/browser language after mount
+  // and keeps <html lang> in sync.
   return (
-    <html lang="en">
+    <html lang={DEFAULT_LOCALE}>
       <body>
-        <a className="skip-link" href="#main">
-          Skip to content
-        </a>
-        <StatusProvider>
-          <header className="topbar">
-            <Link href="/" className="brand" aria-label="Multimodal RAG Agent home">
-              <span className="brand-mark" aria-hidden="true">
-                RAG
-              </span>
-              <span>
-                Multimodal RAG Agent
-                <small>Hybrid RRF · ReAct · Gemini Vision</small>
-              </span>
-            </Link>
-            <NavTabs />
-            <div className="topbar-end">
-              <StatusBadge />
-              <ThemeToggle />
-            </div>
-          </header>
-          <main id="main" className="main" tabIndex={-1}>
-            {children}
-          </main>
-        </StatusProvider>
+        <LocaleProvider>
+          <SkipLink />
+          <StatusProvider>
+            <header className="topbar">
+              <BrandLink />
+              <NavTabs />
+              <div className="topbar-end">
+                <StatusBadge />
+                <LanguageToggle />
+                <ThemeToggle />
+              </div>
+            </header>
+            <main id="main" className="main" tabIndex={-1}>
+              {children}
+            </main>
+          </StatusProvider>
+        </LocaleProvider>
       </body>
     </html>
   );

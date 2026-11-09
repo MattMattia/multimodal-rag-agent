@@ -528,6 +528,13 @@ export interface components {
              * @description Máximo de iteraciones ReAct (por defecto AGENT_MAX_TURNS)
              */
             max_turns?: number | null;
+            /**
+             * Language
+             * @description Idioma de la respuesta: 'es', 'en' o 'auto' (se detecta a partir del mensaje; 'es' si es indecidible)
+             * @default auto
+             * @enum {string}
+             */
+            language: "es" | "en" | "auto";
         };
         /**
          * AgentChatResponse
@@ -1737,6 +1744,8 @@ export interface operations {
         parameters: {
             query?: {
                 format?: "markdown" | "pdf";
+                /** @description Idioma de las etiquetas del documento exportado */
+                lang?: "es" | "en";
             };
             header?: {
                 "x-api-key"?: string | null;
@@ -1967,7 +1976,10 @@ export interface operations {
     };
     evaluate_retrieval_api_v1_demo_evaluate_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Idioma de las advertencias del informe */
+                lang?: "es" | "en";
+            };
             header?: {
                 "x-api-key"?: string | null;
             };

@@ -4,10 +4,12 @@
  */
 import type {
   AgentChatRequest,
+  ChatLanguage,
   EvaluateRequest,
   ExportFormat,
   ExportTranscriptMessage,
   FeedbackRequest,
+  ResponseLanguage,
   SearchMode,
   SearchRequest,
 } from "../contracts";
@@ -65,6 +67,21 @@ function mode(body: Record<string, unknown>, key: string): Validated<SearchMode>
   return SEARCH_MODES.includes(value as SearchMode) ? ok(value as SearchMode) : fail(`${key} must be hybrid, dense or sparse`);
 }
 
+const CHAT_LANGUAGES: readonly ChatLanguage[] = ["es", "en", "auto"];
+
+/** Optional chat `language`; absent stays absent so the backend default ("auto") applies. */
+function language(body: Record<string, unknown>): Validated<ChatLanguage | undefined> {
+  const value = body.language;
+  if (value === undefined || value === null) return ok(undefined);
+  return CHAT_LANGUAGES.includes(value as ChatLanguage) ? ok(value as ChatLanguage) : fail("language must be es, en or auto");
+}
+
+/** Optional `lang` query of the export/evaluate routes; null when absent (backend default applies). */
+export function parseLang(value: string | null): Validated<ResponseLanguage | null> {
+  if (value === null || value === "") return ok(null);
+  return value === "es" || value === "en" ? ok(value) : fail("lang must be es or en");
+}
+
 function collect<T>(checks: Record<string, Validated<unknown>>, build: (v: Record<string, unknown>) => T): Validated<T> {
   const values: Record<string, unknown> = {};
   for (const [key, check] of Object.entries(checks)) {
@@ -90,6 +107,7 @@ export function parseChatRequest(body: unknown): Validated<AgentChatRequest> {
       top_k: intInRange(body, "top_k", 1, 50, 5),
       enable_rerank: bool(body, "enable_rerank", true),
       max_turns: maxTurns,
+      language: language(body),
     },
     (v) => ({ ...(v as unknown as AgentChatRequest), temperature: temperature as number | null }),
   );

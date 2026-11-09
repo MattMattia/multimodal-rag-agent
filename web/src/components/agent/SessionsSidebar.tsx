@@ -1,12 +1,8 @@
-import type { DocumentResponse, ExportFormat, SessionSummary } from "@/lib/contracts";
+"use client";
 
-export const QUICK_PROMPTS = [
-  "What HNSW parameters does the vector index use (m, ef_construction)?",
-  "How much revenue did North America bring in Q3? Show the regional table.",
-  "How does the system stop a webhook from reaching internal IPs (SSRF)?",
-  "Describe the microservices architecture diagram and how services reach the database.",
-  "Generate a PDF report on GlobalTech's EBITDA and inference costs.",
-] as const;
+import type { DocumentResponse, ExportFormat, SessionSummary } from "@/lib/contracts";
+import { formatDate } from "@/lib/i18n/format";
+import { useLocale } from "@/lib/i18n/LocaleProvider";
 
 interface Props {
   sessions: readonly SessionSummary[];
@@ -20,39 +16,42 @@ interface Props {
   onDelete: (id: string) => void;
   onExport: (format: ExportFormat) => void;
   onFilter: (id: string | null) => void;
+  /** Receives the prompt in the active language: it is shown and sent exactly as displayed. */
   onQuickPrompt: (prompt: string) => void;
 }
 
 export function SessionsSidebar(props: Props) {
   const { sessions, activeId, documents, filterDocumentId, busy } = props;
+  const { locale, t } = useLocale();
+  const s = t.agent.sidebar;
   return (
-    <aside className="sidebar stack" aria-label="Sessions and evaluator tools">
+    <aside className="sidebar stack" aria-label={s.label}>
       <section className="card stack">
         <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2 style={{ margin: 0 }}>🗂️ Sessions</h2>
+          <h2 style={{ margin: 0 }}>{s.sessions}</h2>
           <button type="button" className="btn btn-sm btn-primary" onClick={props.onNew} disabled={busy}>
-            + New
+            {s.newSession}
           </button>
         </div>
         {sessions.length === 0 ? (
           <p className="subtle" style={{ margin: 0 }}>
-            No saved sessions yet.
+            {s.empty}
           </p>
         ) : (
           <ul className="session-list">
-            {sessions.map((s) => (
-              <li key={s.session_id} className="session-item" aria-current={s.session_id === activeId ? "true" : undefined}>
-                <button type="button" className="session-open" onClick={() => props.onOpen(s.session_id)} disabled={busy}>
-                  <span>{s.title || "Untitled session"}</span>
+            {sessions.map((session) => (
+              <li key={session.session_id} className="session-item" aria-current={session.session_id === activeId ? "true" : undefined}>
+                <button type="button" className="session-open" onClick={() => props.onOpen(session.session_id)} disabled={busy}>
+                  <span>{session.title || s.untitled}</span>
                   <span className="subtle">
-                    {s.message_count} messages · {new Date(s.updated_at).toLocaleDateString()}
+                    {s.messages(session.message_count)} · {formatDate(locale, session.updated_at)}
                   </span>
                 </button>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm icon-btn"
-                  aria-label={`Delete session ${s.title}`}
-                  onClick={() => props.onDelete(s.session_id)}
+                  aria-label={s.deleteSession(session.title)}
+                  onClick={() => props.onDelete(session.session_id)}
                   disabled={busy}
                 >
                   🗑️
@@ -61,26 +60,21 @@ export function SessionsSidebar(props: Props) {
             ))}
           </ul>
         )}
-        <div className="row" role="group" aria-label="Export current session">
+        <div className="row" role="group" aria-label={s.exportGroup}>
           <button type="button" className="btn btn-sm" disabled={!props.canExport} onClick={() => props.onExport("markdown")}>
-            ⬇️ Markdown
+            {s.exportMarkdown}
           </button>
           <button type="button" className="btn btn-sm" disabled={!props.canExport} onClick={() => props.onExport("pdf")}>
-            ⬇️ PDF
+            {s.exportPdf}
           </button>
         </div>
       </section>
 
       <section className="card stack">
         <div className="field">
-          <label htmlFor="doc-filter">📄 Document filter</label>
-          <select
-            id="doc-filter"
-            className="select"
-            value={filterDocumentId ?? ""}
-            onChange={(e) => props.onFilter(e.target.value || null)}
-          >
-            <option value="">All documents</option>
+          <label htmlFor="doc-filter">{s.documentFilter}</label>
+          <select id="doc-filter" className="select" value={filterDocumentId ?? ""} onChange={(e) => props.onFilter(e.target.value || null)}>
+            <option value="">{s.allDocuments}</option>
             {documents.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.filename}
@@ -91,9 +85,9 @@ export function SessionsSidebar(props: Props) {
       </section>
 
       <section className="card stack">
-        <h2 style={{ margin: 0 }}>⚡ Quick prompts for evaluators</h2>
+        <h2 style={{ margin: 0 }}>{s.quickPromptsTitle}</h2>
         <div className="quick-prompts">
-          {QUICK_PROMPTS.map((p) => (
+          {t.agent.quickPrompts.map((p) => (
             <button key={p} type="button" className="chip" disabled={busy} onClick={() => props.onQuickPrompt(p)}>
               {p}
             </button>

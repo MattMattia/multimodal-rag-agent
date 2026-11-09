@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useLocale } from "@/lib/i18n/LocaleProvider";
 
 type Theme = "light" | "dark" | "system";
 const STORAGE_KEY = "rag-theme";
 const NEXT: Record<Theme, Theme> = { system: "light", light: "dark", dark: "system" };
-const LABEL: Record<Theme, string> = { system: "🖥️ System", light: "☀️ Light", dark: "🌙 Dark" };
 
 function applyTheme(theme: Theme): void {
   const root = document.documentElement;
@@ -15,6 +15,7 @@ function applyTheme(theme: Theme): void {
 
 export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>("system");
+  const { t } = useLocale();
 
   useEffect(() => {
     try {
@@ -40,8 +41,8 @@ export function ThemeToggle() {
   };
 
   return (
-    <button type="button" className="btn btn-ghost btn-sm" onClick={cycle} aria-label={`Theme: ${theme}. Switch theme`}>
-      {LABEL[theme]}
+    <button type="button" className="btn btn-ghost btn-sm" onClick={cycle} aria-label={t.shell.theme.toggleLabel(t.shell.theme.name[theme])}>
+      {t.shell.theme.label[theme]}
     </button>
   );
 }
